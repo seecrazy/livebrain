@@ -15,9 +15,10 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ..decision.types import SpeechTask
 from ..events import LiveEvent
+from ..mixed.capture import HumanCapture
 from ..util import sha256_hex, uid
 from .compliance import ComplianceNotArmed, ComplianceOverlay
-from .renderer import RendererProvider
+from .renderer import RendererProvider, VideoFrame
 from .tts import TTSProvider
 
 GENESIS_FRAME = sha256_hex("livebrain-frame-genesis")
@@ -58,6 +59,69 @@ class StreamingPipeline:
         self._interrupt = False
         self._frame_hash = GENESIS_FRAME
         self._frame_count = 0
+        # 混播（V4.2）：真人画面段状态
+        self._human_mode = False
+        self._capture: HumanCapture = None
+        self._human_frame_idx = 0
+
+    # ------------------------------------------------------------------
+    # 混播：真人画面段（DESIGN §7.7）
+    # ------------------------------------------------------------------
+    @property
+    def in_human_mode(self) -> bool:
+        return self._human_mode
+
+    def _badge_for_scene(self, scene: str) -> bool:
+        """AI 标识跟随内容源：真人采集帧按 label_policy 决定，其余恒叠加。"""
+        profile = self.compliance.profile
+        policy = getattr(profile, "label_policy", "ai_content_only") if profile \
+            else "ai_content_only"
+        if scene == "human" and policy == "ai_content_only":
+            return False
+        return True
+
+    async def begin_human_mode(self, capture: HumanCapture = None) -> None:
+        """切入真人画面段：复用打断过渡段的交叉淡化（防画面硬切）。"""
+        if not self.compliance.armed:
+            raise ComplianceNotArmed("AI 标识未武装，拒绝切换真人画面")
+        self._human_mode = True
+        self._capture = capture
+        async for frame in self.renderer.transition("human-switch"):
+            self._record_frame(VideoFrame(
+                frame.idx, "human-switch", "transition", True, frame.ts))
+        self.log.append({"type": "transition", "reason": "switch_to_human",
+                         "frames": 6})
+        source = "human" if capture else "avatar_idle"
+        self.log.append({"type": "switch_source", "to": source})
+        self.audit.append("visual_source", self.room_id, {"to": source})
+
+    async def human_tick(self) -> bool:
+        """真人段每 tick 推一帧采集画面（帧哈希照常入审计链）。"""
+        if not self._human_mode or self._capture is None:
+            return False
+        frame = await self._capture.next_frame()
+        self._human_frame_idx += 1
+        video = VideoFrame(self._human_frame_idx, "human-segment", "human",
+                           self._badge_for_scene("human"), frame.ts)
+        checkpoint = self._record_frame(video)
+        self.log.append({"type": "human_frame", "seq": frame.seq,
+                         "scene": frame.scene, "badge_on": video.badge_on,
+                         "checkpoint": bool(checkpoint)})
+        return True
+
+    async def end_human_mode(self) -> None:
+        """切回数字人画面段：再次交叉淡化，标识恢复恒叠加。"""
+        if not self._human_mode:
+            return
+        self._human_mode = False
+        self._capture = None
+        async for frame in self.renderer.transition("avatar-switch"):
+            self._record_frame(VideoFrame(
+                frame.idx, "avatar-switch", "transition", True, frame.ts))
+        self.log.append({"type": "transition", "reason": "switch_to_avatar",
+                         "frames": 6})
+        self.log.append({"type": "switch_source", "to": "avatar"})
+        self.audit.append("visual_source", self.room_id, {"to": "avatar"})
 
     def request_interrupt(self) -> None:
         self._interrupt = True
@@ -66,6 +130,9 @@ class StreamingPipeline:
         if not self.compliance.armed:
             self.log.append({"type": "gate_blocked", "task_id": task.task_id})
             raise ComplianceNotArmed("AI 标识未武装，拒绝推流")
+        if self._human_mode:
+            self.log.append({"type": "human_mode_reject", "task_id": task.task_id})
+            raise RuntimeError("真人画面段拒绝 AI 话术（应经接管门静默）")
 
         self.busy = True
         self.current_task = task

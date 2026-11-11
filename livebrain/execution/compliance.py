@@ -15,6 +15,9 @@ class ComplianceProfile:
     position: str = "top-center"     # 部分平台要求醒目位置，角落小字不合规
     requires_registration: bool = True
     audio_hint_interval_s: int = 300  # 音频周期提示间隔
+    # AI 标识叠加策略（V4.2 混播）：ai_content_only=仅 AI 生成内容（数字人帧）叠加，
+    # 真人采集画面不叠；always=全时段叠加（更保守，部分商家偏好）
+    label_policy: str = "ai_content_only"
 
 
 class ComplianceNotArmed(Exception):

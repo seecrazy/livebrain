@@ -14,6 +14,11 @@ class Settings:
     # 真实 LLM 延迟下开启；Mock 零延迟场景无意义）
     emit_filler: bool = False
 
+    # 混播排班（V4.2）：开播后按时段切换 AI/真人，如
+    # [{"duration_s": 600, "mode": "ai", "label": "长尾品"},
+    #  {"duration_s": 1800, "mode": "human", "label": "主推真人场"}]
+    mixed_schedule: List[dict] = field(default_factory=list)
+
     # 弹幕处理
     danmu_max_len: int = 120
     aggregate_window_s: float = 15.0

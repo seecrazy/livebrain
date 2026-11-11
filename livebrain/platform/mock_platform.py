@@ -30,12 +30,16 @@ class MockPlatform:
                  compliance_profile: Optional[ComplianceProfile] = None,
                  banned_words: Tuple[str, ...] = ("库存告急",),
                  registered: bool = True,
-                 ops_failure_rate: float = 0.0) -> None:
+                 ops_failure_rate: float = 0.0,
+                 human_capture=None,
+                 avatar_asset_id: Optional[str] = None) -> None:
         self.room_id = room_id
         self.compliance_profile = compliance_profile or DEFAULT_PROFILE
         self.banned_words = banned_words
         self.registered = registered
         self.ops_failure_rate = ops_failure_rate
+        self.human_capture = human_capture          # 混播：真人采集通道（V4.2）
+        self.avatar_asset_id = avatar_asset_id      # 形象资产（开播门禁校验用）
         self._schedule: List[Tuple[float, LiveEvent]] = []
         self._t0: Optional[float] = None
         self._ops_seq = 0

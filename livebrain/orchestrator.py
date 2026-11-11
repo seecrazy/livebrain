@@ -34,6 +34,7 @@ from .execution.degradation import CapabilityChain
 from .execution.pipeline import SpeechResult, StreamingPipeline
 from .execution.renderer import MockRenderer
 from .execution.tts import MockTTS
+from .mixed.schedule import MixedSchedule
 from .ops.takeover import TakeoverController
 from .perception import classifier
 from .perception.aggregator import (AggregatedQuestion, QuestionAggregator,
@@ -65,12 +66,14 @@ class LiveBrain:
                  speech_sink: Optional[Callable[[str, str], None]] = None,
                  llm_script: Optional[Dict[str, str]] = None,
                  llm_latency_s: float = 0.0,
-                 room_id: str = "room-001") -> None:
+                 room_id: str = "room-001",
+                 avatar_store=None) -> None:
         self.settings = settings or Settings()
         self.clock = Clock(self.settings.clock_scale)
         self.audit = AuditLog(audit_path)
         self.room_id = room_id
         self.platform = platform or MockPlatform(room_id)
+        self.avatar_store = avatar_store            # 形象资产（开播门禁，V4.2）
 
         # 数据层
         self.store = ProductStore()
@@ -111,6 +114,7 @@ class LiveBrain:
 
         # 总线与调度
         self.bus = PriorityEventQueue()
+        self.mixed = MixedSchedule(self.settings.mixed_schedule)   # 混播排班（V4.2）
         self.escalation = {"active": False, "reason": ""}
         self.alerts: List[str] = []
         self.judgments: List[LiveEvent] = []
@@ -128,8 +132,17 @@ class LiveBrain:
     async def start(self) -> None:
         if not self.platform.registered:
             raise RuntimeError("平台未完成开播报备，拒绝开播（合规门禁）")
+        if (self.avatar_store is not None
+                and getattr(self.platform, "avatar_asset_id", None)):
+            ok, reason = self.avatar_store.usable_on(
+                self.platform.avatar_asset_id,
+                self.platform.compliance_profile.platform,
+                requires_registration=self.platform.compliance_profile.requires_registration)
+            if not ok:
+                raise RuntimeError("形象资产未通过开播门禁：%s" % reason)
         self.platform.start(self.clock.now())
         self.compliance.arm(self.platform.compliance_profile)
+        self.mixed.begin(self.clock.now())
         self.audit.append("stream_start", self.room_id, {
             "profile": self.platform.compliance_profile.platform,
             "label": self.platform.compliance_profile.label_text,
@@ -154,6 +167,11 @@ class LiveBrain:
     async def _tick(self) -> bool:
         progressed = False
 
+        # 混播排班：边界跨越 -> 统一模式切换（V4.2）
+        for transition in self.mixed.poll(self.clock.now()):
+            await self._apply_mode_transition(transition)
+            progressed = True
+
         for event in self.platform.poll(self.clock.now()):
             self.bus.publish(event)
             progressed = True
@@ -164,6 +182,9 @@ class LiveBrain:
 
         progressed |= await self._schedule_speech()
 
+        if self.pipeline.in_human_mode and await self.pipeline.human_tick():
+            progressed = True
+
         event = self.bus.get()
         if event is not None:
             await self._handle(event)
@@ -173,14 +194,53 @@ class LiveBrain:
             progressed = True
 
         self._collect_speak_result()
-        if not progressed and self.aggregator.pending():
-            await asyncio.sleep(0.002)   # 只剩聚合窗口在等：避免空转
+        if not progressed and (self.aggregator.pending()
+                               or self.mixed.pending(self.clock.now())):
+            await asyncio.sleep(0.002)   # 只剩聚合窗口/排班边界在等：避免空转
         else:
             await asyncio.sleep(0)       # 让播报任务推进一个控制点
 
         return bool(progressed or self.bus or self._speak_task
                     or self._pending_speech or self.platform.has_pending()
-                    or self.promises.pending() or self.aggregator.pending())
+                    or self.promises.pending() or self.aggregator.pending()
+                    or self.mixed.pending(self.clock.now())
+                    or self.pipeline.in_human_mode)
+
+    # ------------------------------------------------------------------
+    # 混播模式切换（V4.2，DESIGN §7.7）：手动接管与排班切换共用入口
+    # ------------------------------------------------------------------
+    async def _apply_mode_transition(self, transition: Dict) -> None:
+        if transition["to"] == "human":
+            await self._enter_human("schedule:%s" % transition.get("label", ""))
+        else:
+            await self._exit_human(force=False, reason="schedule")
+
+    async def _enter_human(self, reason: str) -> None:
+        """切入真人：AI 静默 + 在播话术淡出 + 待播清空 + 画面切换。"""
+        if self.takeover.ai_muted():
+            return
+        self.takeover.takeover(self.pipeline, reason)
+        self.alerts.append("HUMAN_TAKEOVER:%s" % reason)
+        if self._speak_task is not None:
+            await asyncio.wait([self._speak_task])
+            self._collect_speak_result()
+        if self._pending_speech:
+            self.audit.append("pending_dropped", self.room_id,
+                              {"count": len(self._pending_speech),
+                               "reason": reason})
+            self._pending_speech = []
+        capture = getattr(self.platform, "human_capture", None)
+        await self.pipeline.begin_human_mode(capture)
+
+    async def _exit_human(self, force: bool = False, reason: str = "manual") -> bool:
+        """切回 AI：先过交回门（未核销承诺清点），再切回数字人画面。"""
+        ok, info = self.takeover.rehandoff(
+            self.promises, self.persona, self.session, force=force)
+        if not ok:
+            self.alerts.append("REHANDOFF_BLOCKED:%s" % info.get("reason", ""))
+            return False
+        await self.pipeline.end_human_mode()
+        return True
     async def _schedule_speech(self) -> bool:
         progressed = False
         if self._speak_task is not None and self._speak_task.done():
@@ -188,6 +248,8 @@ class LiveBrain:
             progressed = True
         if not self._pending_speech:
             return progressed
+        if self.takeover.ai_muted():
+            return progressed            # 真人段不启新 AI 话术（待播已清空，防御）
 
         if self._speak_task is None:
             task = self._pop_pending()
@@ -260,16 +322,9 @@ class LiveBrain:
         action = event.payload.get("action", "")
         params = event.payload.get("params", {})
         if action == "takeover":
-            if not self.takeover.ai_muted():
-                self.takeover.takeover(
-                    self.pipeline, params.get("reason", "manual"))
-                self.alerts.append("HUMAN_TAKEOVER")
+            await self._enter_human(params.get("reason", "manual"))
         elif action == "rehandoff":
-            ok, info = self.takeover.rehandoff(
-                self.promises, self.persona, self.session,
-                force=params.get("force", False))
-            if not ok:
-                self.alerts.append("REHANDOFF_BLOCKED:%s" % info.get("reason"))
+            await self._exit_human(force=params.get("force", False))
         elif action == "resume":
             self.escalation = {"active": False, "reason": ""}
             self.audit.append("escalation_resume", self.room_id,
