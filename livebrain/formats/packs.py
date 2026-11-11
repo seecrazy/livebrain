@@ -50,9 +50,10 @@ class ChatFormat(RoomFormat):
 
     def __init__(self):
         self._topic_pos = 0
+        self.topics = list(self.TOPICS)     # 可被 --data 装载覆盖
 
     def proactive(self, brain):
-        topic = self.TOPICS[self._topic_pos % len(self.TOPICS)]
+        topic = self.topics[self._topic_pos % len(self.topics)]
         self._topic_pos += 1
         return build_task([topic], source="format:topic",
                           origin="话题推进", clock=brain.clock)
@@ -101,9 +102,10 @@ class MusicFormat(RoomFormat):
     def __init__(self):
         self.queue: List[str] = []
         self.served: List[str] = []
+        self.whitelist = list(self.WHITELIST)   # 授权曲库，可被 --data 装载覆盖
 
     def _match(self, text: str) -> Optional[str]:
-        for song in self.WHITELIST:
+        for song in self.whitelist:
             if song in text:
                 return song
         return None
@@ -167,9 +169,10 @@ class StandupFormat(RoomFormat):
     def __init__(self):
         self._pos = 0
         self._current: Optional[dict] = None
+        self.jokes = list(self.JOKES)      # 可被 --data 装载覆盖
 
     def _next_joke(self) -> dict:
-        joke = self.JOKES[self._pos % len(self.JOKES)]
+        joke = self.jokes[self._pos % len(self.jokes)]
         self._pos += 1
         return joke
 
@@ -189,7 +192,7 @@ class StandupFormat(RoomFormat):
         """被打断的段子不算讲完：回炉下个节目位重讲。"""
         if (result.interrupted and result.task.source == "format:joke"
                 and self._current):
-            self._pos = (self._pos - 1) % len(self.JOKES)
+            self._pos = (self._pos - 1) % len(self.jokes)
             self._current = None
 
 
@@ -234,9 +237,10 @@ class CrosstalkFormat(RoomFormat):
 
     def __init__(self):
         self._pos = 0
+        self.script = list(self.SCRIPT)    # 可被 --data 装载覆盖
 
     def proactive(self, brain):
-        beat = self.SCRIPT[self._pos % len(self.SCRIPT)]
+        beat = self.script[self._pos % len(self.script)]
         self._pos += 1
         emotion = "playful" if beat["role"] == "A" else "steady"
         return build_task(

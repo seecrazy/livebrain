@@ -1,19 +1,20 @@
-"""直播间数据加载（V4.3.1）：开播前把商家的商品库与知识库装进编排器。
+"""直播间数据加载（V4.3.1 / V4.4）：开播前装进编排器的一切内容。
 
-JSON 格式（价格单位=元，内部自动转分）：
+通用块（电商与咨询）：
 {
-  "products": [{
-      "sku": "SKU001", "name": "烟酰胺焕亮精华", "category": "beauty",
-      "price": 129.0, "orig_price": 159.0,
-      "stock": 30, "total_stock": 50, "ship_days": 2,
-      "coupons": [{"type": "full_cut", "threshold": 100, "cut": 10}],
-      "qual_flags": []
-  }],
-  "knowledge": [
-      {"sku": "SKU001", "text": "含 5% 烟酰胺…", "keywords": ["烟酰胺", "保湿"]}
-  ]
+  "products": [{ "sku", "name", "category", "price"(元), "orig_price",
+                 "stock", "total_stock", "ship_days", "coupons", "qual_flags" }],
+  "knowledge": [{ "sku", "text", "keywords" }]
 }
-示例见 config/room.example.json。
+
+场景内容块（按 --format 生效，V4.4）：
+{
+  "chat":      { "topics": ["话题…"] },
+  "music":     { "whitelist": ["已授权曲名…"] },        # 版权白名单=授权曲库
+  "standup":   { "jokes": [{ "id", "setup", "punch" }] },
+  "crosstalk": { "script": [{ "role": "A", "line": "…" }] }   # A=逗哏 B=捧哏
+}
+示例见 config/room.example.json。校验失败抛 ValueError（开播前发现）。
 """
 import json
 from typing import Any, Dict, Tuple
@@ -25,7 +26,8 @@ from ..decision.knowledge_store import KnowledgeDoc
 def load_room_data(brain, path: str) -> Tuple[int, int]:
     """加载直播间数据：返回 (商品数, 知识条数)。首个商品自动设为当前讲品。
 
-    校验失败抛 ValueError（开播前发现，好过直播中翻车）。
+    场景内容块只在 brain.format 对应场景时装载（如 music.whitelist 只在
+    --format music 时生效）。校验失败抛 ValueError（开播前发现，好过直播中翻车）。
     """
     with open(path, encoding="utf-8") as fh:
         try:
@@ -73,7 +75,47 @@ def load_room_data(brain, path: str) -> Tuple[int, int]:
 
     if products:
         brain.session.current_sku = str(products[0]["sku"])
+
+    _load_format_content(brain, data)
     return len(products), len(knowledge)
+
+
+def _load_format_content(brain, data: Dict) -> None:
+    """场景内容块装载：只对当前场景生效。"""
+    fmt = brain.format
+    block = data.get(fmt.format_id)
+    if not isinstance(block, dict):
+        return
+
+    if fmt.format_id == "chat":
+        topics = [str(t) for t in block.get("topics", []) if str(t).strip()]
+        if topics:
+            fmt.topics = topics
+    elif fmt.format_id == "music":
+        whitelist = [str(s) for s in block.get("whitelist", [])
+                     if str(s).strip()]
+        if whitelist:
+            fmt.whitelist = whitelist          # 授权曲库整体替换
+    elif fmt.format_id == "standup":
+        jokes = []
+        for index, joke in enumerate(block.get("jokes", [])):
+            _require(joke, ("setup", "punch"), "standup.jokes[%d]" % index)
+            jokes.append({
+                "id": str(joke.get("id", "custom-%d" % index)),
+                "setup": str(joke["setup"]), "punch": str(joke["punch"])})
+        if jokes:
+            fmt.jokes = jokes
+    elif fmt.format_id == "crosstalk":
+        script = []
+        for index, beat in enumerate(block.get("script", [])):
+            _require(beat, ("role", "line"), "crosstalk.script[%d]" % index)
+            role = str(beat["role"]).upper()
+            if role not in ("A", "B"):
+                raise ValueError("crosstalk.script[%d].role 必须是 A(逗哏)/B(捧哏)"
+                                 % index)
+            script.append({"role": role, "line": str(beat["line"])})
+        if script:
+            fmt.script = script
 
 
 def _yuan_to_cents(value: Any) -> int:

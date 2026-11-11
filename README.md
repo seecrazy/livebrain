@@ -39,18 +39,30 @@ python3 -m livebrain.console --format crosstalk     # 多人相声：对词轮�
 
 ### ① 直播前 · 10 分钟准备
 
+**第一步：准备直播间数据**（一个 JSON 搞定，按场景取用，示例见 `config/room.example.json`）
+
+| 场景 | 要准备什么 | JSON 块 |
+|---|---|---|
+| 电商带货（默认） | 商品库 + 知识库（价格单位=元） | `"products"` + `"knowledge"` |
+| 唱歌演艺 | **授权曲库白名单**（版权硬约束，未授权曲目自动婉拒） | `"music": {"whitelist": [...]}` |
+| 单口相声·脱口秀 | 你的段子（setup + 包袱） | `"standup": {"jokes": [...]}` |
+| 多人相声 | 对词本（A=逗哏 / B=捧哏） | `"crosstalk": {"script": [...]}` |
+| 聊天陪伴 | 话题库 | `"chat": {"topics": [...]}` |
+
+场景内容块按 `--format` 生效（同一份文件可同时存多场景内容）；不准备也能开播，用内置演示内容。
+
+**第二步：启动值守控制台**
+
 ```bash
-# 1) 准备你的商品与知识库（示例：config/room.example.json，价格单位=元）
-cp config/room.example.json my_room.json   # 改成你的商品/卖点/FAQ
+cp config/room.example.json my_room.json    # 改成你的内容
 
-# 2) 启动值守控制台（--format 选场景；--data 装载你的数据）
-python3 -m livebrain.console --data my_room.json --format ecommerce
-
-# 2b) 接真实大模型（火山方舟/DeepSeek/vLLM 任意 OpenAI 兼容端点）：
-export ARK_API_KEY=... LIVEBRAIN_LLM_BASE_URL=https://ark.cn-beijing.volcengine.com/api/v3 \
-       LIVEBRAIN_LLM_MODEL=ep-xxxx
-python3 -m livebrain.console --data my_room.json --real-llm
+python3 -m livebrain.console --data my_room.json                        # 电商带货
+python3 -m livebrain.console --data my_room.json --format music         # 唱歌演艺
+python3 -m livebrain.console --data my_room.json --format standup --real-llm   # 接真实大模型
 ```
+
+接真实大模型（火山方舟/DeepSeek/vLLM 任意 OpenAI 兼容端点）需环境变量：
+`ARK_API_KEY`、`LIVEBRAIN_LLM_BASE_URL`、`LIVEBRAIN_LLM_MODEL`；失败自动熔断回落，直播不中断。
 
 打开 **http://127.0.0.1:8765**（或 `mac/run.sh` 用 Mac 原生应用，⌘T 接管热键）。
 开播自检自动执行：平台报备、形象授权、AI 标识门禁——任一不过直接拒绝开播。

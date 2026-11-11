@@ -92,3 +92,54 @@ def test_console_runtime_with_data_smoke():
 
     state = aio.run(run())
     assert state["started"] and state["compliance"]["armed"]
+
+
+def test_format_content_loading():
+    """场景内容块按 --format 生效（V4.4）。"""
+    from livebrain.console.__main__ import ConsoleRuntime
+
+    path = _write({
+        "products": [], "knowledge": [],
+        "music": {"whitelist": ["夜空中最亮的星", "山海"]},
+        "standup": {"jokes": [{"setup": "s", "punch": "p"}]},
+    })
+    music = ConsoleRuntime(room_id="room-fm", port=0, data_path=path,
+                           format_id="music").brain
+    assert music.format.whitelist == ["夜空中最亮的星", "山海"]
+    # 未授权曲目仍被婉拒
+    task = music.format.handle_song_request(music, "来一首孤勇者", "u1")
+    assert task.source == "format:song_decline"
+    ack = music.format.handle_song_request(music, "唱一首山海", "u2")
+    assert ack.source == "format:song_ack" and "山海" in ack.sentences[0]
+
+    standup = ConsoleRuntime(room_id="room-fs", port=0, data_path=path,
+                             format_id="standup").brain
+    assert standup.format.jokes[0]["setup"] == "s"
+    # crosstalk 块不在数据里且场景不匹配 -> 内容保持内置
+    talk = ConsoleRuntime(room_id="room-ft", port=0, data_path=path,
+                          format_id="crosstalk").brain
+    assert talk.format.script[0]["role"] == "A"
+
+
+def test_format_content_validation():
+    standup = LiveBrain(platform=MockPlatform("room-vs"),
+                        settings=Settings(clock_scale=0.0), room_id="room-vs",
+                        format_id="standup")
+    bad = _write({"standup": {"jokes": [{"setup": "缺包袱"}]}})
+    try:
+        load_room_data(standup, bad)
+    except ValueError as exc:
+        assert "punch" in str(exc)
+    else:
+        raise AssertionError("缺 punch 必须报错")
+
+    talk = LiveBrain(platform=MockPlatform("room-vt"),
+                     settings=Settings(clock_scale=0.0), room_id="room-vt",
+                     format_id="crosstalk")
+    bad_role = _write({"crosstalk": {"script": [{"role": "C", "line": "x"}]}})
+    try:
+        load_room_data(talk, bad_role)
+    except ValueError as exc:
+        assert "role" in str(exc)
+    else:
+        raise AssertionError("非法角色必须报错")
