@@ -13,6 +13,7 @@ PRIORITY_TEMPLATE = 1
 PRIORITY_FAST = 2
 PRIORITY_MID = 4
 PRIORITY_INTERACT = 6
+PRIORITY_FILLER = 7                   # 等待期衔接话术，最低优先级
 
 
 @dataclass

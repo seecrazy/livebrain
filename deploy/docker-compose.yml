@@ -1,0 +1,49 @@
+# LiveBrain M2 数据层本地环境（验证期）
+# 用法：cd deploy && docker compose up -d
+# 生产部署：分实例部署 + 密钥走托管服务，不使用本文件默认口令。
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: livebrain-pg
+    environment:
+      POSTGRES_DB: livebrain
+      POSTGRES_USER: livebrain
+      POSTGRES_PASSWORD: livebrain_dev   # 仅本地验证
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U livebrain"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: livebrain-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    container_name: livebrain-clickhouse
+    environment:
+      CLICKHOUSE_DB: livebrain
+      CLICKHOUSE_USER: livebrain
+      CLICKHOUSE_PASSWORD: livebrain_dev   # 仅本地验证
+    ports:
+      - "8123:8123"
+    volumes:
+      - ch_data:/var/lib/clickhouse
+
+volumes:
+  pg_data:
+  ch_data:

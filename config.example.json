@@ -1,0 +1,22 @@
+{
+  "chains": {
+    "llm": ["ark", "mock_llm_backup"],
+    "tts": ["edge_tts", "mock_tts"],
+    "renderer": ["mock_renderer"]
+  },
+  "emit_filler": true,
+  "mid_budget_ms": 4000,
+  "breaker_threshold": 3,
+  "llm": {
+    "provider": "openai_compat",
+    "base_url": "https://ark.cn-beijing.volcengine.com/api/v3",
+    "model": "ep-2026xxxxxxxx",
+    "api_key_env": "ARK_API_KEY",
+    "_说明": "凭据从环境变量读取，禁止入库；Ark/DeepSeek/vLLM 等任何 OpenAI 兼容端点均可"
+  },
+  "tts": {
+    "_授权矩阵": "商用实时链路只允许有商用授权的流式 TTS；edge_tts 仅验证期/预合成",
+    "validation": "edge_tts(zh-CN-XiaoxiaoNeural)",
+    "production": "volcengine | azure | minimax"
+  }
+}

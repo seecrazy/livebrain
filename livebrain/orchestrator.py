@@ -24,9 +24,9 @@ from .decision.knowledge_store import KnowledgeStore, seed_default as seed_knowl
 from .decision.llm_agent import MidTrackAgent, MockLLM
 from .decision.persona import PersonaManager
 from .decision.rule_engine import RuleEngine
-from .decision.types import (PRIORITY_INTERACT, PRIORITY_MID,
-                             PRIORITY_TEMPLATE, SpeechTask, TRACK_MID,
-                             TRACK_FALLBACK)
+from .decision.types import (PRIORITY_FILLER, PRIORITY_INTERACT,
+                             PRIORITY_MID, PRIORITY_TEMPLATE, SpeechTask,
+                             TRACK_MID, TRACK_FALLBACK)
 from .events import (CONTROL, DANMU, JUDGMENT, METRIC, LiveEvent,
                      control_event)
 from .execution.compliance import ComplianceNotArmed, ComplianceOverlay
@@ -51,6 +51,10 @@ _T_INTERACT = [
     "欢迎新来的宝宝，点个关注不迷路～",
     "我是 AI 虚拟主播哈，帮大家讲解产品，信息以详情页为准～",
     "谢谢宝宝的支持，爱你们～",
+]
+_T_FILLER = [
+    "这个问题很好，我详细给她说下哈～",
+    "宝宝稍等，我看一下哈，马上说～",
 ]
 
 
@@ -115,6 +119,7 @@ class LiveBrain:
         self._pending_speech: List[SpeechTask] = []   # 待播队列（按优先级取）
         self._interact_counter = 0
         self._interact_index = 0
+        self._filler_index = 0
         self._started = False
 
     # ------------------------------------------------------------------
@@ -400,6 +405,8 @@ class LiveBrain:
                     origin=question.representative_text, clock=self.clock)
                 self._submit_speech(task)
                 return
+            if self.settings.emit_filler and not self.pipeline.busy:
+                self._submit_filler(question.representative_text)
             task = await self.mid_agent.generate(
                 question, product, self.persona, strategy,
                 online=self.session.online)
@@ -421,8 +428,31 @@ class LiveBrain:
         if self._submit_speech(task) is None:
             self.alerts.append("TEMPLATE_BLOCKED:%s" % source)
 
+    def _submit_filler(self, origin: str) -> None:
+        """等待期衔接话术：数字无关、承诺无关，最低优先级。
+
+        管线空闲时直接开播（不等下一 tick——生成期间 tick 循环被
+        await 阻塞，排队的话术永远轮不到）；正播报中则跳过。
+        """
+        if self._speak_task is not None:
+            return
+        template = _T_FILLER[self._filler_index % len(_T_FILLER)]
+        self._filler_index += 1
+        task = SpeechTask(
+            task_id=uid("spk"), track="template", sentences=[template],
+            priority=PRIORITY_FILLER, emotion=self.field.strategy().emotion,
+            ops=[], origin=origin, source="template_filler", facts={},
+            created_ts=self.clock.now())
+        if self._submit_speech(task) is not None and self._speak_task is None:
+            self._speak_task = asyncio.ensure_future(self.pipeline.speak(task))
+
     def _submit_speech(self, task: SpeechTask) -> Optional[SpeechTask]:
         """出稿统一后处理：过滤 -> 原子展开+承诺扫描 -> 人设装饰 -> 排队播报。"""
+        # 正式话术到达即取代排队中的 filler（filler 只为填补等待期）
+        if task.source != "template_filler":
+            self._pending_speech = [
+                t for t in self._pending_speech
+                if t.source != "template_filler"]
         product = self.store.get(self.session.current_sku)
         category = product.category if product else ""
         qual_flags = product.qual_flags if product else []

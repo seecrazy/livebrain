@@ -17,6 +17,7 @@ _INJECTION_PATTERNS = [
     re.compile(r"disregard.{0,12}(all|any|previous|prior|above|instructions)", re.I),
     re.compile(r"(system|assistant|developer|系统|开发者|管理员)\s*[:：>】]", re.I),
     re.compile(r"你(现在|马上)?(是|变成|扮演|假扮|充当).{0,10}(另一个|别的|系统|开发者|管理员|客服|官方)", re.I),
+    re.compile(r"(扮演|假扮|冒充).{0,8}(客服|系统|管理员|官方|主播|政府|品牌方)", re.I),
     re.compile(r"(进入|开启|打开).{0,6}(开发者|管理员|越狱|jailbreak|dan).{0,6}(模式|mode)?", re.I),
     re.compile(r"jailbreak|developer\s*mode|dan\s*mode", re.I),
     re.compile(r"\{\{.*\}\}|<\|.*\|>|<script.*>|```", re.I | re.S),

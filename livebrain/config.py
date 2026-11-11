@@ -10,6 +10,10 @@ class Settings:
     mid_budget_ms: int = 4000          # 中轨超时阈值，超时落保守模板
     filler_after_ms: int = 1500        # 等待超过该时长先播 filler
 
+    # filler 调度：中轨生成期间若管线空闲，先播衔接话术（默认关，
+    # 真实 LLM 延迟下开启；Mock 零延迟场景无意义）
+    emit_filler: bool = False
+
     # 弹幕处理
     danmu_max_len: int = 120
     aggregate_window_s: float = 15.0
