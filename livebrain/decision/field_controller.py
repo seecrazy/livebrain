@@ -32,15 +32,20 @@ STRATEGIES = {
 
 
 class FieldController:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings,
+                 strategies: dict = None) -> None:
         self.settings = settings
         self.stage = WARMUP
         self.peak_online = 0
         self._pending_target: Optional[str] = None
         self._ticks = 0
+        # 场景包可覆盖策略表（V4.4：同四阶段键，参数与情绪按场景定）
+        self._strategies = dict(STRATEGIES)
+        if strategies:
+            self._strategies.update(strategies)
 
     def strategy(self) -> StageStrategy:
-        return STRATEGIES[self.stage]
+        return self._strategies[self.stage]
 
     def _wanted(self, online: int, stock_ratio: float) -> Tuple[str, str]:
         s = self.settings

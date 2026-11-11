@@ -27,20 +27,22 @@ from .decision.rule_engine import RuleEngine
 from .decision.types import (PRIORITY_FILLER, PRIORITY_INTERACT,
                              PRIORITY_MID, PRIORITY_TEMPLATE, SpeechTask,
                              TRACK_MID, TRACK_FALLBACK)
-from .events import (CONTROL, DANMU, JUDGMENT, METRIC, LiveEvent,
+from .events import (CONTROL, DANMU, GIFT, JUDGMENT, METRIC, LiveEvent,
                      control_event)
 from .execution.compliance import ComplianceNotArmed, ComplianceOverlay
 from .execution.degradation import CapabilityChain
 from .execution.pipeline import SpeechResult, StreamingPipeline
 from .execution.renderer import MockRenderer
 from .execution.tts import MockTTS
+from .formats import create as create_format
 from .mixed.schedule import MixedSchedule
 from .ops.takeover import TakeoverController
 from .perception import classifier
 from .perception.aggregator import (AggregatedQuestion, QuestionAggregator,
                                     ReplyBudget)
-from .perception.classifier import (ACTION_REQUEST, INTERACT, NOISE,
-                                    PRICE_STOCK, PRODUCT_CONSULT, SENSITIVE)
+from .perception.classifier import (ACTION_REQUEST, INTERACT, JOKE_REQUEST,
+                                    NOISE, PRICE_STOCK, PRODUCT_CONSULT,
+                                    SENSITIVE, SONG_REQUEST)
 from .perception.sanitizer import sanitize
 from .platform.mock_platform import MockPlatform
 from .util import Clock, uid
@@ -67,7 +69,8 @@ class LiveBrain:
                  llm_script: Optional[Dict[str, str]] = None,
                  llm_latency_s: float = 0.0,
                  room_id: str = "room-001",
-                 avatar_store=None) -> None:
+                 avatar_store=None,
+                 format_id: str = "ecommerce") -> None:
         self.settings = settings or Settings()
         self.clock = Clock(self.settings.clock_scale)
         self.audit = AuditLog(audit_path)
@@ -91,8 +94,10 @@ class LiveBrain:
             room_id=room_id, platform=self.platform, speech_sink=speech_sink)
 
         # 决策层
+        self.format = create_format(format_id)     # 直播场景包（V4.4）
         self.persona = PersonaManager(self.settings)
-        self.field = FieldController(self.settings)
+        self.field = FieldController(self.settings,
+                                     strategies=self.format.stage_strategies())
         self.aggregator = QuestionAggregator(self.settings, self.clock)
         self.budget = ReplyBudget(self.settings.fast_reply_per_min,
                                   self.settings.llm_reply_per_min)
@@ -124,6 +129,7 @@ class LiveBrain:
         self._interact_counter = 0
         self._interact_index = 0
         self._filler_index = 0
+        self._idle_ticks = 0                       # 场景包主动推进计数
         self.danmu_feed: List[Dict] = []     # 运营控制台弹幕流（含意图/隔离标记）
         self._started = False
 
@@ -185,6 +191,23 @@ class LiveBrain:
 
         if self.pipeline.in_human_mode and await self.pipeline.human_tick():
             progressed = True
+
+        # 场景包主动推进（V4.4）：冷场（无待播/无待答/非真人段/非判罚）即上节目；
+        # 噪音弹幕不清零计数——它们不构成"有事可做"
+        if (self.settings.proactive_after_ticks > 0
+                and not self._speak_task and not self._pending_speech
+                and not self.takeover.ai_muted()
+                and not self.escalation["active"]
+                and not self.aggregator.pending()):
+            if not self.bus:
+                self._idle_ticks += 1
+                if self._idle_ticks >= self.settings.proactive_after_ticks:
+                    self._idle_ticks = 0
+                    task = self.format.proactive(self)
+                    if task is not None:
+                        self._submit_speech(task)
+        else:
+            self._idle_ticks = 0
 
         event = self.bus.get()
         if event is not None:
@@ -293,6 +316,7 @@ class LiveBrain:
         self._speak_task = None
         self.speech_results.append(result)
         self.session.note_utterance()
+        self.format.on_speech_done(self, result)      # 场景包回调（V4.4）
         for ops_action in result.task.ops:
             self.promises.submit(ops_action, result.utterance_id)
         for judgment in result.judgment_events:
@@ -308,8 +332,23 @@ class LiveBrain:
             await self._handle_control(event)
         elif event.kind == METRIC:
             self._handle_metric(event)
+        elif event.kind == GIFT:
+            self._handle_gift(event)
         elif event.kind == DANMU:
             await self._handle_danmu(event)
+
+    def _handle_gift(self, event: LiveEvent) -> None:
+        """礼物：场景包感谢话术（高优先级出稿），事件入审计。"""
+        user_id = event.payload.get("user_id", "宝宝")
+        gift = event.payload.get("gift", "礼物")
+        count = int(event.payload.get("count", 1))
+        if self.takeover.ai_muted():
+            return
+        self.audit.append("gift", self.room_id,
+                          {"user_id": user_id, "gift": gift, "count": count})
+        task = self.format.gift_thanks(self, user_id, gift, count)
+        if self._submit_speech(task) is None:
+            self.alerts.append("GIFT_THANKS_BLOCKED")
 
     def _handle_judgment(self, event: LiveEvent) -> None:
         self.judgments.append(event)
@@ -387,6 +426,17 @@ class LiveBrain:
             self._submit_template(_T_ACTION, "template_action",
                                   result.cleaned)
             return
+        if intent.intent in (SONG_REQUEST, JOKE_REQUEST):
+            # 场景包意图：直接由场景包应答（含非对应场景的礼貌婉拒）
+            if intent.intent == SONG_REQUEST:
+                task = self.format.handle_song_request(self, result.cleaned,
+                                                       user_id)
+            else:
+                task = self.format.handle_joke_request(self, result.cleaned,
+                                                       user_id)
+            if self._submit_speech(task) is None:
+                self.alerts.append("FORMAT_INTENT_BLOCKED")
+            return
         if intent.intent == PRICE_STOCK:
             if not intent.purchase_intent:
                 if not self.budget.allow("fast", now):
@@ -426,7 +476,8 @@ class LiveBrain:
         step = max(1, int(round(1.0 / ratio))) if ratio < 1.0 else 1
         if self._interact_counter % step != 0:
             return
-        template = _T_INTERACT[self._interact_index % len(_T_INTERACT)]
+        template = self.format.interact_reply(self) or \
+            _T_INTERACT[self._interact_index % len(_T_INTERACT)]
         self._interact_index += 1
         self._submit_template(template, "template_interact", text,
                               priority=PRIORITY_INTERACT)
@@ -580,7 +631,11 @@ class LiveBrain:
         return {
             "room": self.room_id,
             "started": self._started,
+            "format": self.format.format_id,
+            "format_name": self.format.display_name,
             "stage": self.field.stage,
+            "stage_name": self.format.stage_display.get(self.field.stage,
+                                                        self.field.stage),
             "stage_strategy": {
                 "interact_ratio": self.field.strategy().interact_reply_ratio,
                 "emotion": self.field.strategy().emotion,

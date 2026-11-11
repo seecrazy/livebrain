@@ -18,6 +18,8 @@ PRODUCT_CONSULT = "product_consult"
 INTERACT = "interact"
 SENSITIVE = "sensitive"
 ACTION_REQUEST = "action_request"
+SONG_REQUEST = "song_request"      # 点歌（V4.4 场景包）
+JOKE_REQUEST = "joke_request"      # 段子/包袱（V4.4 场景包）
 NOISE = "noise"
 
 # 快轨子类型
@@ -55,11 +57,17 @@ _ACTION_WORDS = [
 # 购买意图（提升事件优先级 + 不受回复率预算限制）
 _PURCHASE_WORDS = ["链接", "怎么拍", "怎么买", "如何拍", "下单", "拍了", "上链接", "去哪买", "怎样购买"]
 
+# 点歌 / 段子（场景包意图，非对应场景由场景包礼貌婉拒）
+_SONG_WORDS = ["唱一首", "来一首", "点歌", "点一首", "唱个歌", "安可", "想听你唱"]
+_JOKE_WORDS = ["讲个段子", "来个段子", "说个段子", "讲个笑话", "说个笑话",
+               "来个笑话", "来个包袱", "抖个包袱", "返场"]
+
 # 互动闲聊
 _INTERACT_WORDS = [
     "哈哈哈", "主播", "好看", "加油", "来了", "666", "支持", "爱了", "hello",
     "你好", "晚上好", "早上好", "大家好", "刚来", "第一", "签到", "真人吗",
     "是真人", "数字人", "机器人", "彩蛋", "音乐", "唱歌", "跳个舞",
+    "再来一段", "继续", "经典", "节奏真好", "有意思", "笑死",
 ]
 
 _EMOJI_ONLY = re.compile(r"^[\W\s_]+$")
@@ -95,6 +103,13 @@ def classify(text: str) -> IntentResult:
     if _match_any(text, _ACTION_WORDS):
         return IntentResult(intent=ACTION_REQUEST, purchase_intent=purchase,
                             topic_key="action", matched=_match_any(text, _ACTION_WORDS))
+
+    if _match_any(text, _SONG_WORDS):
+        return IntentResult(intent=SONG_REQUEST, purchase_intent=False,
+                            topic_key="song", matched=_match_any(text, _SONG_WORDS))
+    if _match_any(text, _JOKE_WORDS):
+        return IntentResult(intent=JOKE_REQUEST, purchase_intent=False,
+                            topic_key="joke", matched=_match_any(text, _JOKE_WORDS))
 
     price_hits = _match_any(text, _PRICE_WORDS)
     stock_hits = _match_any(text, _STOCK_WORDS)

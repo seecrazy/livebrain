@@ -49,6 +49,8 @@ const INTENT_TAG = {
   interact: ["interact", "互动"],
   sensitive: ["sensitive", "敏感"],
   action_request: ["action", "诱导"],
+  song_request: ["mid", "点歌"],
+  joke_request: ["interact", "段子"],
   noise: ["noise", "噪音"],
   injection: ["inject", "注入"],
 };
@@ -64,11 +66,9 @@ function chip(text, cls) {
 }
 
 function renderTopbar(s) {
-  const stageNames = {
-    warmup: "暖场期", explain: "讲解期", closing: "逼单期", valley: "低谷期",
-  };
   $("status-chips").innerHTML = [
-    chip(`阶段 <b>${stageNames[s.stage] || s.stage}</b>`, "stage"),
+    chip(`<b>${s.format_name || s.format || "电商带货"}</b>`, ""),
+    chip(`阶段 <b>${s.stage_name || s.stage}</b>`, "stage"),
     chip(`人设 <b>${s.persona_name}</b>`, "persona"),
     chip(s.mode === "human" ? "<b>真人在场</b>" : "<b>AI 主播</b>",
          s.mode === "human" ? "mode-human" : "mode-ai"),

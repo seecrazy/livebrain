@@ -7,10 +7,25 @@
 | | |
 |---|---|
 | **如何在直播中使用** | 见下方"直播前/中/后"三章 + [docs/USAGE.md](docs/USAGE.md) 值守手册 |
-| 设计文档 | [DESIGN.md](DESIGN.md)（V4.3 完整设计：R1–R14 整改 + V1–V7 增补，10 张架构图） |
+| 设计文档 | [DESIGN.md](DESIGN.md)（V4.4 完整设计：R1–R14 整改 + V1–V9 增补，11 张架构图） |
 | 项目进度 | [PROGRESS.md](PROGRESS.md)（里程碑总览 / 增补明细 / 质量指标 / 风险看板 / 变更日志） |
 | 路线图 | [ROADMAP.md](ROADMAP.md)（M1–M4 验收标准） |
-| 当前状态 | **M1+V4.2+V4.3 已交付 · M2 代码完成**：125 测试全绿，零运行时依赖（Python 3.9+） |
+| 当前状态 | **M1+V4.2/V4.3/V4.4 已交付 · M2 代码完成**：134 测试全绿，零运行时依赖（Python 3.9+） |
+
+## 直播场景（V4.4）：直播不一定是卖货
+
+决策骨架（三轨/消毒/打断/审计/混播/值守）场景无关，生意域是可插拔**场景包**——同一编排器，换包即换赛道：
+
+```bash
+python3 -m livebrain.console                        # 电商带货（默认）
+python3 -m livebrain.console --format chat          # 聊天陪伴：话题库冷场自动接续
+python3 -m livebrain.console --format music         # 唱歌演艺：点歌入队+版权白名单（未授权婉拒）
+python3 -m livebrain.console --format standup       # 单口相声·脱口秀：段子库轮转，被打断的段子回炉重讲
+python3 -m livebrain.console --format crosstalk     # 多人相声：对词轮转（A逗哏/B捧哏），双形象同台=M3
+```
+
+冷场约 0.8 秒自动上节目（排品/话题/报幕/段子/对词）；礼物感谢、点歌、段子请求全部场景化应答；
+**场景无关的防护对娱乐场同样生效**（注入隔离/敏感拦截/审计/标识门禁），唱歌场景的版权白名单与电商的品类宣称引擎同级。自定义场景包：继承 `formats.RoomFormat` 注册即可（`livebrain/formats/packs.py` 有五个范例）。
 
 ## 如何在直播中使用（运营视角）
 
@@ -111,7 +126,7 @@ flowchart TB
 ## 快速开始
 
 ```bash
-# 全量测试（120 个，离线可跑）
+# 全量测试（134 个，离线可跑）
 python3 -m pytest tests/ -q
 
 # 模拟直播间演示：注入攻击/敏感拦截/幻觉拦截/承诺核销/判罚升级/降级切换/打断
@@ -135,6 +150,7 @@ python3 tools/replay.py check  --in  /tmp/session.jsonl
 | 多直播间 | ✅ | 每间一个 LiveBrain 实例（GPU 池调度 M3） |
 | 单间双主播 | 🔶 设计就绪 | 多 persona 并行/双话术通道/轮转策略（DESIGN §10.1，实施 M3） |
 | 运营控制台 | ✅ V4.3 已交付 | 网页大屏（`python3 -m livebrain.console`）+ Mac 原生应用（`mac/run.sh`，⌘T 热键）；Windows/移动原生壳 M4（网页版已覆盖移动浏览器） |
+| 直播场景 | ✅ V4.4 已交付 | 电商带货/聊天陪伴/唱歌演艺（点歌+版权白名单）/单口相声·脱口秀/多人相声（对词轮转）；自定义场景包可插拔 |
 
 ## 信任四件套（与竞品的本质差异）
 

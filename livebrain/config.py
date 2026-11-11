@@ -19,6 +19,10 @@ class Settings:
     #  {"duration_s": 1800, "mode": "human", "label": "主推真人场"}]
     mixed_schedule: List[dict] = field(default_factory=list)
 
+    # 场景包主动推进（V4.4）：连续空闲 N 个 tick 且无事可做时，
+    # 场景包提供主动节目内容（排品/话题/段子/报幕/对词）。0=关闭。
+    proactive_after_ticks: int = 0
+
     # 弹幕处理
     danmu_max_len: int = 120
     aggregate_window_s: float = 15.0
