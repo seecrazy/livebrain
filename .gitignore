@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+demo/audit_demo.jsonl
+*.egg-info/
+.venv/
+.DS_Store
