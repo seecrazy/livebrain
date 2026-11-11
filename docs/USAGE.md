@@ -47,15 +47,19 @@
 | 启动报"形象资产未通过开播门禁" | 真人底模无/过期肖像授权，或该平台未绑定报备 | 补授权文件或换已报备形象 |
 | 启动报"平台未完成开播报备" | 平台报备开关未过 | 完成平台报备流程 |
 | 画面区出现"⚠标识未武装" | AI 标识门禁未武装 | 重启控制台（正常流程自动武装；出现即属配置异常，禁止开播） |
+| 控制台打开是 401/空白 | URL 缺 token（启动日志里有完整入口 URL；token 文件在 /tmp/livebrain-console-<端口>.token） | 用带 token 的 URL 打开 |
+| 推流提示"缺 drawtext" | ffmpeg 构建不含文本滤镜，已自动降级纯画面（无字幕/无 AI 标识） | 仅限链路验证测试间；商用开播必须换完整 ffmpeg |
 | 话术全是兜底（橙） | LLM 链全熔断或超时 | 检查端点/凭据；兜底池可撑场，按需接管 |
 | PIPELINE_ERROR 告警 | 推流管线异常 | 优先接管真人，再排查日志 |
 | 承诺长期 pending | 平台动作 API 拒绝/异常 | 人工补操作后核销；连续失败检查平台侧权限 |
 
 ## 五、直播后复盘
 
+直播中可随时点**录制本场**，结束后提示的 JSONL 路径直接用于下述校验：
+
 ```bash
-# 1) 本场弹幕回放回归（四不变量：哈希链/注入隔离/出稿干净/承诺核销）
-python3 tools/replay.py record --out session.jsonl
+# 本场弹幕回放回归（四不变量：哈希链/注入隔离/出稿干净/承诺核销）
+python3 tools/replay.py check --in /tmp/livebrain-session-*.jsonl
 python3 tools/replay.py check  --in  session.jsonl
 
 # 2) 红队集全量回归（改过话术/词表/提示词后必跑）

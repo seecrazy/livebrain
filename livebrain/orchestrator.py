@@ -22,6 +22,7 @@ from .decision.fallback import FallbackSpeaker
 from .decision.field_controller import FieldController
 from .decision.knowledge_store import KnowledgeStore, seed_default as seed_knowledge
 from .decision.llm_agent import MidTrackAgent, MockLLM
+from .decision.persona import PERSONAS as _ALL_PERSONAS_MAP
 from .decision.persona import PersonaManager
 from .decision.rule_engine import RuleEngine
 from .decision.types import (PRIORITY_FILLER, PRIORITY_INTERACT,
@@ -45,7 +46,7 @@ from .perception.classifier import (ACTION_REQUEST, INTERACT, JOKE_REQUEST,
                                     SENSITIVE, SONG_REQUEST)
 from .perception.sanitizer import sanitize
 from .platform.mock_platform import MockPlatform
-from .util import Clock, uid
+from .util import Clock, pii, uid
 
 _T_SENSITIVE = "这个我不能乱说哈，具体功效宝宝看商品详情页，或者问下客服更稳妥～"
 _T_ACTION = "售后都有正规保障，具体政策宝宝看详情页的售后说明哈，我不敢随便打包票～"
@@ -130,6 +131,7 @@ class LiveBrain:
         self._interact_index = 0
         self._filler_index = 0
         self._idle_ticks = 0                       # 场景包主动推进计数
+        self._gen_tasks: List = []                 # 并发中的中轨生成任务（P0-1）
         self.danmu_feed: List[Dict] = []     # 运营控制台弹幕流（含意图/隔离标记）
         self._started = False
 
@@ -150,6 +152,12 @@ class LiveBrain:
         self.platform.start(self.clock.now())
         self.compliance.arm(self.platform.compliance_profile)
         self.mixed.begin(self.clock.now())
+        preferred = getattr(self.format, "default_persona", "xiaotian")
+        if preferred != self.persona.current.persona_id:
+            self.persona.set_initial(preferred)
+            self.audit.append("persona_switch", self.room_id,
+                              {"persona_id": preferred, "ok": True,
+                               "reason": "format_default"})
         self.audit.append("stream_start", self.room_id, {
             "profile": self.platform.compliance_profile.platform,
             "label": self.platform.compliance_profile.label_text,
@@ -173,6 +181,10 @@ class LiveBrain:
     # ------------------------------------------------------------------
     async def _tick(self) -> bool:
         progressed = False
+
+        # 收尾已完成的生成任务（P0-1）
+        if self._gen_tasks:
+            self._gen_tasks = [t for t in self._gen_tasks if not t.done()]
 
         # 混播排班：边界跨越 -> 统一模式切换（V4.2）
         for transition in self.mixed.poll(self.clock.now()):
@@ -219,8 +231,10 @@ class LiveBrain:
 
         self._collect_speak_result()
         if not progressed and (self.aggregator.pending()
-                               or self.mixed.pending(self.clock.now())):
-            await asyncio.sleep(0.002)   # 只剩聚合窗口/排班边界在等：避免空转
+                               or self.mixed.pending(self.clock.now())
+                               or self._gen_tasks
+                               or self._speak_task is not None):
+            await asyncio.sleep(0.002)   # 只在等生成/播报/窗口/边界：防 tick 空转
         else:
             await asyncio.sleep(0)       # 让播报任务推进一个控制点
 
@@ -228,7 +242,7 @@ class LiveBrain:
                     or self._pending_speech or self.platform.has_pending()
                     or self.promises.pending() or self.aggregator.pending()
                     or self.mixed.pending(self.clock.now())
-                    or self.pipeline.in_human_mode)
+                    or self.pipeline.in_human_mode or self._gen_tasks)
 
     # ------------------------------------------------------------------
     # 混播模式切换（V4.2，DESIGN §7.7）：手动接管与排班切换共用入口
@@ -345,7 +359,7 @@ class LiveBrain:
         if self.takeover.ai_muted():
             return
         self.audit.append("gift", self.room_id,
-                          {"user_id": user_id, "gift": gift, "count": count})
+                          {"user": pii(user_id), "gift": gift, "count": count})
         task = self.format.gift_thanks(self, user_id, gift, count)
         if self._submit_speech(task) is None:
             self.alerts.append("GIFT_THANKS_BLOCKED")
@@ -408,7 +422,7 @@ class LiveBrain:
                          quarantined=result.quarantined)
         if result.quarantined:
             self.audit.append("quarantine", self.room_id, {
-                "user_id": user_id, "text": text[:60],
+                "user": pii(user_id), "text": text[:60],
                 "reasons": result.reasons})
             return
         if intent.intent == NOISE:
@@ -419,12 +433,14 @@ class LiveBrain:
         self.session.note_question(result.cleaned)
 
         if intent.intent == SENSITIVE:
-            self._submit_template(_T_SENSITIVE, "template_sensitive",
-                                  result.cleaned)
+            self._submit_template(
+                self.format.sensitive_template or _T_SENSITIVE,
+                "template_sensitive", result.cleaned)
             return
         if intent.intent == ACTION_REQUEST:
-            self._submit_template(_T_ACTION, "template_action",
-                                  result.cleaned)
+            self._submit_template(
+                self.format.action_template or _T_ACTION,
+                "template_action", result.cleaned)
             return
         if intent.intent in (SONG_REQUEST, JOKE_REQUEST):
             # 场景包意图：直接由场景包应答（含非对应场景的礼貌婉拒）
@@ -516,16 +532,38 @@ class LiveBrain:
                 return
             if self.settings.emit_filler and not self.pipeline.busy:
                 self._submit_filler(question.representative_text)
+            # P0-1：生成并发化——慢 LLM 不阻塞 tick（判罚/接管随时可进）
+            self._gen_tasks.append(asyncio.ensure_future(
+                self._generate_and_submit(question, product)))
+
+    async def _generate_and_submit(self, question: AggregatedQuestion,
+                                   product) -> None:
+        """后台生成中轨话术并出稿；生成期间接管/判罚则弃用或降级。"""
+        try:
             task = await self.mid_agent.generate(
-                question, product, self.persona, strategy,
+                question, product, self.persona, self.field.strategy(),
                 online=self.session.online)
-            submitted = self._submit_speech(task)
-            if submitted is None and task.track == TRACK_MID:
-                # 中轨被承诺词拦截 -> 落兜底，绝不带病出稿
-                fallback_task = self.fallback.next(
-                    product.name, self.session.online, strategy,
-                    origin=question.representative_text, clock=self.clock)
-                self._submit_speech(fallback_task)
+        except Exception as exc:                     # 生成异常不倒直播
+            self.alerts.append("GENERATION_ERROR:%s" % exc)
+            self.audit.append("generation_error", self.room_id,
+                              {"error": str(exc)})
+            return
+        if self.takeover.ai_muted():
+            self.audit.append("generation_discarded", self.room_id,
+                              {"reason": "human_mode"})
+            return
+        if self.escalation["active"] and task.track == TRACK_MID:
+            self._submit_template(_T_ESCALATED, "template_escalated",
+                                  question.representative_text)
+            return
+        submitted = self._submit_speech(task)
+        if submitted is None and task.track == TRACK_MID:
+            # 中轨被承诺词拦截 -> 落兜底，绝不带病出稿
+            fallback_task = self.fallback.next(
+                product.name, self.session.online,
+                self.field.strategy(),
+                origin=question.representative_text, clock=self.clock)
+            self._submit_speech(fallback_task)
 
     def _submit_template(self, template: str, source: str, origin: str,
                          priority: int = PRIORITY_TEMPLATE) -> None:
@@ -642,6 +680,10 @@ class LiveBrain:
             },
             "persona": self.persona.current.persona_id,
             "persona_name": self.persona.current.name,
+            "personas": [{"id": p.persona_id, "name": p.name}
+                         for p in _ALL_PERSONAS_MAP.values()],
+            "format_view": self.format.view(self),
+            "recording": {"active": False, "path": "", "events": 0},
             "mode": "human" if self.takeover.ai_muted() else "ai",
             "escalation": dict(self.escalation),
             "online": self.session.online,
@@ -678,7 +720,7 @@ class LiveBrain:
             },
             "audit": {
                 "count": len(self.audit.entries),
-                "verified": self.audit.verify()[0],
+                "verified": self.audit.verified_fast(),   # 增量校验（P0-2）
                 "quarantined": self.audit.count("quarantine"),
                 "promise_blocks": self.audit.count("promise_block"),
                 "generation_rejected": self.audit.count("generation_rejected"),

@@ -30,10 +30,17 @@ class RoomFormat:
 
     format_id = "ecommerce"
     display_name = "电商带货"
+    default_persona = "xiaotian"          # 场景默认人设（开播时应用）
+    sensitive_template = None             # 场景化敏感拒答模板（None=编排器默认）
+    action_template = None                # 场景化承诺诱导拒答模板
     stage_display = {
         "warmup": "暖场期", "explain": "讲解期", "closing": "逼单期",
         "valley": "低谷期",
     }
+
+    def view(self, brain) -> Dict:
+        """场景面板（控制台展示）：点歌队列/段子进度/对词轮次等。"""
+        return {}
 
     def stage_strategies(self) -> Dict[str, StageStrategy]:
         """覆盖默认场控策略（同四阶段键，参数与情绪按场景定）。"""

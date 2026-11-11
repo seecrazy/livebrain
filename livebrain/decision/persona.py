@@ -29,6 +29,14 @@ PERSONAS: Dict[str, Persona] = {
         "ajing", "阿静",
         "你是专业沉稳的主播阿静，讲解条理清楚，语速平缓，称呼观众\"朋友们\"，重点讲成分与适用性。",
         "professional_female", "calm", "朋友们"),
+    "duoge": Persona(
+        "duoge", "逗哥",
+        "你是相声脱口秀演员逗哥，节奏快、包袱密，善于自嘲和观察生活，称呼观众\"各位\"。",
+        "witty_male", "witty", "各位"),
+    "nuannuan": Persona(
+        "nuannuan", "暖暖",
+        "你是聊天陪伴主播暖暖，声音温和、共情力强，擅长倾听和接住观众情绪，称呼观众\"宝\"。",
+        "warm_female", "warm", "宝"),
 }
 
 
@@ -39,6 +47,13 @@ class PersonaManager:
         self.current: Persona = PERSONAS[initial]
         self.manual_switches = 0
         self._utterance_seq = 0
+
+    def set_initial(self, persona_id: str) -> Tuple[bool, str]:
+        """场景默认人设（开播应用）：不占手动切换额度。"""
+        if persona_id not in PERSONAS:
+            return False, "unknown_persona"
+        self.current = PERSONAS[persona_id]
+        return True, "ok"
 
     def switch(self, persona_id: str, source: str,
                stage_boundary: bool = False) -> Tuple[bool, str]:

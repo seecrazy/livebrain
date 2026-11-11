@@ -14,6 +14,12 @@ class EcommerceFormat(RoomFormat):
     format_id = "ecommerce"
     display_name = "电商带货"
 
+    def view(self, brain):
+        product = brain.store.get(brain.session.current_sku)
+        return {"当前讲品": product.name if product else "—",
+                "库存比": "%.0f%%" % (product.stock_ratio() * 100)
+                          if product else "—"}
+
     async def proactive(self, brain) -> Optional[object]:
         """空闲排品推进：复用兜底话术池（防机械重复设计同样适用）。"""
         product = brain.store.get(brain.session.current_sku)
@@ -27,6 +33,9 @@ class EcommerceFormat(RoomFormat):
 class ChatFormat(RoomFormat):
     format_id = "chat"
     display_name = "聊天陪伴"
+    default_persona = "nuannuan"
+    sensitive_template = "这个我不太懂哈，专业的事得问专业的人，咱们聊点开心的～"
+    action_template = "咱们直播间不打包票哈，好好陪伴最重要～"
     stage_display = {"warmup": "开场热聊", "explain": "话题进行中",
                      "closing": "深度陪伴", "valley": "冷场救场"}
 
@@ -73,6 +82,10 @@ class ChatFormat(RoomFormat):
     INTERACT = ["来啦？坐，正好聊到有意思的地方～", "哈哈哈被你发现了～",
                 "评论区聊起来，我都看着呢～"]
 
+    def view(self, brain):
+        return {"话题进度": "%d/%d" % (self._topic_pos + 1, len(self.topics)),
+                "内容来源": "用户话题库" if self._user_content else "AI 原创+内置"}
+
     def interact_reply(self, brain):
         return self.INTERACT[self._topic_pos % len(self.INTERACT)]
 
@@ -88,6 +101,8 @@ class ChatFormat(RoomFormat):
 class MusicFormat(RoomFormat):
     format_id = "music"
     display_name = "唱歌演艺"
+    sensitive_template = "这个咱不接话哈，好好听歌～"
+    action_template = "承诺就不下了，歌单管够～"
     stage_display = {"warmup": "开嗓暖场", "explain": "点歌演唱中",
                      "closing": "安可环节", "valley": "互动拉气氛"}
 
@@ -122,6 +137,11 @@ class MusicFormat(RoomFormat):
                 return song
         return None
 
+    def view(self, brain):
+        return {"点歌队列": "、".join(self.queue) or "（空）",
+                "最近已唱": "、".join(self.served[-3:]) or "—",
+                "授权曲库": "%d 首" % len(self.whitelist)}
+
     def handle_song_request(self, brain, text, user_id):
         song = self._match(text)
         if song is None:
@@ -151,6 +171,9 @@ class MusicFormat(RoomFormat):
 class StandupFormat(RoomFormat):
     format_id = "standup"
     display_name = "单口相声·脱口秀"
+    default_persona = "duoge"
+    sensitive_template = "这种话头我可不敢接，包袱可以有，这个真没有～"
+    action_template = "不打包票哈，笑果管饱～"
     stage_display = {"warmup": "开场热场", "explain": "段子进行中",
                      "closing": "压轴大段", "valley": "冷场救场"}
 
@@ -184,6 +207,7 @@ class StandupFormat(RoomFormat):
         self._current: Optional[dict] = None
         self.jokes = list(self.JOKES)      # 可被 --data 装载覆盖
         self._user_content = False
+        self._resume_punch: Optional[dict] = None   # 被打断段子的续讲位
 
     def _next_joke(self) -> dict:
         joke = self.jokes[self._pos % len(self.jokes)]
@@ -197,6 +221,13 @@ class StandupFormat(RoomFormat):
                           emotion="witty", clock=brain.clock)
 
     async def proactive(self, brain):
+        if self._resume_punch is not None:         # 从包袱续讲（P1-7）
+            joke = self._resume_punch
+            self._resume_punch = None
+            self._current = joke
+            return build_task([joke["punch"]], source="format:joke_resume",
+                              origin="续包袱:%s" % joke["id"], emotion="witty",
+                              clock=brain.clock)
         if (brain.settings.creative_llm and not self._user_content):
             lines = await CreativeWriter(brain).generate(
                 "joke", "人设：%s。直播场景：脱口秀。原创一个新段子。" %
@@ -206,15 +237,24 @@ class StandupFormat(RoomFormat):
                                origin="AI段子")
         return self._joke_task(self._next_joke(), brain)
 
+    def view(self, brain):
+        return {"段子进度": "%d/%d" % (self._pos, len(self.jokes)),
+                "内容来源": "用户段子库" if self._user_content else "AI 原创+内置",
+                "待续包袱": self._resume_punch["id"] if self._resume_punch else "—"}
+
     def handle_joke_request(self, brain, text, user_id):
         return self._joke_task(self._next_joke(), brain)
 
     def on_speech_done(self, brain, result) -> None:
-        """被打断的段子不算讲完：回炉下个节目位重讲。"""
-        if (result.interrupted and result.task.source == "format:joke"
-                and self._current):
-            self._pos = (self._pos - 1) % len(self.jokes)
-            self._current = None
+        """被打断的段子不算讲完：铺垫已讲 -> 从包袱续；没开口 -> 整段回炉。"""
+        if result.task.source not in ("format:joke", "format:joke_resume"):
+            return
+        if result.interrupted and self._current:
+            if result.sentences_spoken == 1:
+                self._resume_punch = self._current      # 观众听过铺垫，从包袱续
+            else:
+                self._pos = (self._pos - 1) % len(self.jokes)
+        self._current = None
 
 
 # ------------------------------------------------- 多人相声（对词轮转）
@@ -227,6 +267,9 @@ class CrosstalkFormat(RoomFormat):
 
     format_id = "crosstalk"
     display_name = "多人相声"
+    default_persona = "duoge"
+    sensitive_template = "这包袱太大了，我们接不动～"
+    action_template = "口说无凭，乐呵管够～"
     stage_display = {"warmup": "垫话开场", "explain": "正活进行中",
                      "closing": "底活收尾", "valley": "现挂救场"}
 
@@ -288,6 +331,12 @@ class CrosstalkFormat(RoomFormat):
             [("%s：%s" % (beat["role"], beat["line"]))],
             source="format:crosstalk", origin="对词:%d" % self._pos,
             emotion=emotion, clock=brain.clock)
+
+    def view(self, brain):
+        next_role = "B" if self._last_role == "A" else "A"
+        return {"对词进度": "%d/%d" % (self._pos, len(self.script)),
+                "下一棒": "%s（%s）" % (next_role, "逗哏" if next_role == "A" else "捧哏"),
+                "内容来源": "用户对词本" if self._user_content else "AI 续写+内置"}
 
     def handle_joke_request(self, brain, text, user_id):
         """相声场的"来一段/返场"：续演对词（同步路径，走内置脚本）。"""

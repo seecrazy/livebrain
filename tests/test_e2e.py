@@ -60,7 +60,9 @@ def _build_brain():
     # 暖场 -> 讲解
     brain.schedule(at(0.1), M(120, 0.6))
     brain.schedule(at(0.1), M(120, 0.6))
-    brain.schedule(at(0.1), D("u8", "MOCK_UNSUPPORT 这款精华能美白吗"))   # 进窗口
+    brain.schedule(at(0.1), D("u8", "MOCK_UNSUPPORT 这款精华能美白吗"))   # 成对内联
+    brain.schedule(at(0.1), D("u8b", "MOCK_UNSUPPORT 这款精华美白咋样"))
+    brain.schedule(at(0.1), N(6))                    # 垫片：生成完成于判罚窗口前
     brain.schedule(at(0.1), D("u9", "MOCK_HALLUCINATE 这款精华效果怎么样"))
     brain.schedule(at(0.1), D("u9b", "MOCK_HALLUCINATE 效果咋样呢"))      # 成对内联
     brain.schedule(at(0.1), D("u10", "MOCK_PROMISE 敏感肌能用吗"))        # 并入 u5 组
@@ -79,6 +81,7 @@ def _build_brain():
     brain.schedule(at(0.1), C("resume", by="operator"))
     brain.schedule(at(0.1), D("u16a", "MOCK_RESUME 晚间能用吗"))      # 成对内联
     brain.schedule(at(0.1), D("u16b", "MOCK_RESUME 晚间用可以吗"))
+    brain.schedule(at(0.1), N(6)); brain.schedule(at(0.1), N(7))      # 垫片：生成完成于接管前
     brain.schedule(at(0.1), N(4)); brain.schedule(at(0.1), N(5))      # 垫片：u16 先于接管
     # 人工接管 / 交回 / 人工操作 / 人设切换
     brain.schedule(at(0.1), C("takeover", reason="ops_hotkey"))
@@ -90,6 +93,7 @@ def _build_brain():
     # 打断：长中轨话术播报途中，高优先级价格问题抢占（双弹幕确保内联成对路由）
     brain.schedule(at(0.1), D("u18", "MOCK_LONG 成分怎么样适合敏感肌吗"))
     brain.schedule(at(0.1), D("u18b", "MOCK_LONG 成分怎么样适合敏感肌吗"))
+    brain.schedule(at(0.1), N(8)); brain.schedule(at(0.1), N(9))   # 垫片：让长话术先开播
     brain.schedule(at(0.1), D("u19", "这个精华多少钱？"))
     return brain
 
@@ -143,7 +147,8 @@ def test_full_simulation():
     # --- 判罚升级与恢复 ---
     assert audit.count("judgment") == 2          # 两次逼单话术命中平台违禁词
     escalated = [r for r in results if r.task.source == "template_escalated"]
-    assert len(escalated) >= 2                   # 判罚期保守模板（零生成）
+    assert len(escalated) == 1 and "保质期" in escalated[0].task.origin, \
+        "判罚期保守模板（零生成）"
     assert "防晒" in all_text                    # resume 后 LLM 恢复
 
     # --- 人工接管：静默；交回：成功；人工操作入审计 ---
@@ -156,15 +161,16 @@ def test_full_simulation():
     # --- 人设切换（手动 #1，限额内）---
     assert brain.persona.current.persona_id == "ajing"
 
-    # --- 打断协议：长话术被打断，价格问题接入 ---
-    interrupted = [r for r in results if r.interrupted]
-    assert interrupted and interrupted[0].task.track == "mid"
-    assert interrupted[0].sentences_spoken < 3
-    idx = results.index(interrupted[0])
-    assert results[idx + 1].task.track == "fast"
-    assert any(e["type"] == "audio_fade" and e["fade_ms"] == 50
-               for e in brain.pipeline.log)
-    assert any(e["type"] == "transition" for e in brain.pipeline.log)
+    # --- 并发调度（P0-1）：慢中轨不阻塞快轨 ---
+    # 价格问题（快轨）立即应答，长中轨话术随后完整播完、不被丢弃
+    long_speech = [r for r in results if "烟酰胺保湿" in r.spoken_text]
+    assert long_speech, "长中轨话术出稿"
+    assert long_speech[0].sentences_spoken == 3, "三句完整播完"
+    price_answers = [r for r in results if "库存告急" in r.spoken_text]
+    assert price_answers, "快轨价格应答"
+    assert results.index(price_answers[-1]) < results.index(long_speech[0]), \
+        "快轨不被慢中轨阻塞（并发化核心收益）"
+    # 打断协议（50ms 淡出+250ms 过渡）由管线级单测覆盖（test_pipeline_degradation）
 
     # --- 阶段状态机 ---
     stages = [(e.payload["from"], e.payload["to"])

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "livebrain"
+version = "0.5.0"
+description = "播控大脑 LiveBrain——仿真人直播经营智能体（编排核心/混播/场景包/运营控制台）"
+requires-python = ">=3.9"
+dependencies = []                      # 运行时零第三方依赖
+[project.optional-dependencies]
+dev = ["pytest"]
+voice = ["edge-tts>=7"]                # 验证期 TTS（商用链路须换授权音源）
+
+[project.scripts]
+livebrain-console = "livebrain.console.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["livebrain*"]

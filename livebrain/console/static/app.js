@@ -3,10 +3,12 @@
 
 const $ = (id) => document.getElementById(id);
 let lastState = null;
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
 
 /* ---------- API ---------- */
 async function fetchState() {
-  const res = await fetch("/api/state", { cache: "no-store" });
+  const res = await fetch("/api/state?token=" + encodeURIComponent(TOKEN),
+                          { cache: "no-store" });
   if (!res.ok) throw new Error("state " + res.status);
   return res.json();
 }
@@ -17,6 +19,7 @@ async function postControl(action, params = {}) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, params }),
+      headers: { "X-LiveBrain-Token": TOKEN },
     });
     const data = await res.json();
     if (!data.ok) console.warn("control rejected:", data.detail);
@@ -102,6 +105,27 @@ function renderStage(s) {
 function renderOps(s) {
   $("btn-takeover").disabled = s.mode === "human";
   $("btn-rehandoff").disabled = s.mode !== "human";
+  $("persona-buttons").innerHTML = (s.personas || [])
+    .map((p) => `<button class="btn sm" onclick="postControl('persona_switch',{persona_id:'${p.id}'})">${p.name}</button>`)
+    .join(" ");
+  const rec = s.recording || {};
+  const btn = $("btn-record");
+  if (btn) {
+    btn.textContent = rec.active ? `停止录制（${rec.events}）` : "录制本场";
+    btn.classList.toggle("danger", !!rec.active);
+  }
+}
+
+function renderFormatView(s) {
+  const view = s.format_view || {};
+  const legend = $("format-legend");
+  const box = $("format-view");
+  if (legend) legend.textContent = s.format_name || "";
+  if (!box) return;
+  const keys = Object.keys(view);
+  box.innerHTML = keys.length
+    ? keys.map((k) => `<div>${escapeHtml(k)}<b>${escapeHtml(view[k])}</b></div>`).join("")
+    : '<div class="empty">—</div>';
 }
 
 function renderSpeech(s) {
@@ -184,6 +208,7 @@ function render(s) {
   renderSpeech(s);
   renderDanmu(s);
   renderLists(s);
+  renderFormatView(s);
 }
 
 async function refresh() {

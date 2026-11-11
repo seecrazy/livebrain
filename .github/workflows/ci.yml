@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: 安装 pytest
+        run: pip install pytest
+      - name: 单元与集成测试（154 用例）
+        run: python -m pytest tests/ -q
+      - name: 回放不变量校验
+        run: |
+          python3 tools/replay.py record --out /tmp/s.jsonl
+          python3 tools/replay.py check  --in  /tmp/s.jsonl
+      - name: Demo 冒烟
+        run: python3 demo/run_demo.py > /dev/null
+
+  mac-app:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 构建 Mac 原生应用
+        run: mac/build.sh
+      - name: 产物上传
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiveBrainConsole-macos
+          path: mac/LiveBrain Console.app

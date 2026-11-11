@@ -4,7 +4,11 @@ import Cocoa
 import WebKit
 
 let port = 8765
-let baseURL = URL(string: "http://127.0.0.1:\(port)")!
+var baseURL = URL(string: "http://127.0.0.1:\(port)")!
+// 支持启动参数传完整入口 URL（含 token）：open App --args "http://...?token=x"
+if CommandLine.arguments.count > 1, let url = URL(string: CommandLine.arguments[1]) {
+    baseURL = url
+}
 
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     var window: NSWindow!

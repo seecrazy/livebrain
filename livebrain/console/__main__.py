@@ -16,12 +16,14 @@ LIVEBRAIN_LLM_BASE_URL、LIVEBRAIN_LLM_MODEL；失败自动熔断回落 Mock。
 """
 import argparse
 import asyncio
+import os
 import random
+import secrets
 import threading
 import time
 
 from ..config import Settings
-from ..events import LiveEvent, control_event, danmu_event, metric_event
+from ..events import GIFT, LiveEvent, control_event, danmu_event, metric_event
 from ..execution.degradation import CapabilityChain
 from ..execution.llm_openai_compat import OpenAICompatProvider
 from ..decision.llm_agent import MockLLM
@@ -79,9 +81,21 @@ class ConsoleRuntime:
     def __init__(self, room_id: str = "room-console", port: int = 8765,
                  data_path: str = None, real_llm: bool = False,
                  format_id: str = "ecommerce",
-                 creative: bool = False) -> None:
+                 creative: bool = False, config_path: str = None,
+                 rtmp: str = None) -> None:
         self.port = port
         self.format_id = format_id
+        self.config = {}
+        if config_path:
+            import json
+            with open(config_path, encoding="utf-8") as fh:
+                self.config = json.load(fh)
+        settings = Settings.from_dict(self.config) if self.config \
+            else Settings()
+        if not settings.proactive_after_ticks:
+            settings.proactive_after_ticks = 16      # 冷场约0.8s上节目
+        settings.creative_llm = (settings.creative_llm or creative
+                                 or real_llm)
         self.platform = MockPlatform(room_id, human_capture=MockHumanCapture(),
                                      avatar_asset_id="ava-001")
         self.avatars = avatar_mod.AvatarAssetStore()
@@ -89,35 +103,82 @@ class ConsoleRuntime:
         self.brain = LiveBrain(
             platform=self.platform, room_id=room_id,
             llm_script={},
-            settings=Settings(proactive_after_ticks=16,   # 冷场约0.8s上节目
-                              creative_llm=creative or real_llm),
+            settings=settings,
+            speech_sink=lambda uid, sentence: self.streamer is not None
+            and self._speech_q.append(sentence),
             avatar_store=self.avatars, format_id=format_id)
         if data_path:
             n_products, n_docs = load_room_data(self.brain, data_path)
             print("已加载直播间数据：%d 个商品，%d 条知识" % (n_products, n_docs))
+        self.rtmp = rtmp
+        self.streamer = None
+        self._speech_q = []                          # 已播话术 → 推流队列
         if real_llm:
             self._switch_to_real_llm()
         self.real_llm = real_llm
+        self.token = secrets.token_hex(6)            # API 鉴权（P0-4）
         self.loop = asyncio.new_event_loop()
-        self.hub = ConsoleHub(self.brain, self.loop)
+        # 录制本场（P1-6）：导出可直接交给 tools/replay.py check 的 JSONL
+        self.recording = False
+        self.record_path = None
+        self._record_fh = None
+        self.record_count = 0
+        self._t0 = None
         self._online = 96
         self._stock_ratio = 0.62 if format_id == "ecommerce" else 1.0
         self._last_metric = 0.0
         self._last_danmu = 0.0
+        self._last_gift = 0.0
         self._running = True
+        self.hub = ConsoleHub(self.brain, self.loop, extra_state=self._extra_state)
+
+    def _extra_state(self) -> dict:
+        return {
+            "recording": {"active": self.recording, "path": self.record_path or "",
+                          "events": self.record_count},
+            "rtmp": self.rtmp or "",
+        }
 
     def _switch_to_real_llm(self) -> None:
-        primary = OpenAICompatProvider(name="live_llm")
+        llm_conf = self.config.get("llm", {}) if isinstance(
+            self.config.get("llm"), dict) else {}
+        primary = OpenAICompatProvider(
+            name="live_llm",
+            base_url=llm_conf.get("base_url", ""),
+            model=llm_conf.get("model", ""))
         backup = MockLLM("mock_llm_backup")
         self.brain.llm_chain = CapabilityChain(
             "llm", [primary, backup], self.brain.settings, self.brain.audit,
             self.brain.clock, self.brain.room_id)
         self.brain.mid_agent.chain = self.brain.llm_chain
         print("已接入真实 LLM：%s（失败自动熔断回落 Mock）"
-              % (primary.model or "未配置 LIVEBRAIN_LLM_MODEL，调用时将报错切换") )
+              % (primary.model or "未配置 LIVEBRAIN_LLM_MODEL，调用时将报错切换"))
+
+    def _record_event(self, event: LiveEvent) -> None:
+        if not (self.recording and self._record_fh and self._t0 is not None):
+            return
+        import json
+        self._record_fh.write(json.dumps(
+            {"delay": round(event.ts - self._t0, 3),
+             "event": event.to_dict()}, ensure_ascii=False) + "\n")
+        self._record_fh.flush()
+        self.record_count += 1
+
+    def _toggle_record(self, path: str = None) -> str:
+        if self.recording:
+            self._record_fh.close()
+            self.recording = False
+            return "录制停止：%s（%d 条事件，可交 tools/replay.py check）" % (
+                self.record_path, self.record_count)
+        self.record_path = path or "/tmp/livebrain-session-%d.jsonl" % int(
+            time.time())
+        self._record_fh = open(self.record_path, "w", encoding="utf-8")
+        self.recording = True
+        self.record_count = 0
+        return "开始录制：%s" % self.record_path
 
     async def _feed(self) -> None:
-        """真实节奏事件源：弹幕 0.6~2.2s 一条，指标每 2s。"""
+        """真实节奏事件源：弹幕 0.6~2.2s 一条，指标每 2s，礼物约 12s。"""
         now = time.time()
         if now - self._last_danmu > random.uniform(0.6, 2.2):
             self._last_danmu = now
@@ -126,15 +187,28 @@ class ConsoleRuntime:
             else:
                 text = random.choice(NORMAL_DANMU.get(self.format_id,
                                                       NORMAL_DANMU["ecommerce"]))
-            self.brain.bus.publish(danmu_event(
-                self.brain.room_id, "u%03d" % random.randint(1, 999),
-                text, now))
+            event = danmu_event(self.brain.room_id,
+                                "u%03d" % random.randint(1, 999), text, now)
+            self.brain.bus.publish(event)
+            self._record_event(event)
+        if now - self._last_gift > random.uniform(9, 16):
+            self._last_gift = now
+            event = LiveEvent(
+                kind=GIFT, room_id=self.brain.room_id, ts=now, priority=2,
+                payload={"user_id": "老板%03d" % random.randint(1, 99),
+                         "gift": random.choice(["火箭", "棒棒糖", "嘉年华"]),
+                         "count": random.choice([1, 1, 2])})
+            self.brain.bus.publish(event)
+            self._record_event(event)
         if now - self._last_metric > 2.0:
             self._last_metric = now
             self._online = max(30, min(260, self._online + random.randint(-8, 10)))
-            self._stock_ratio = max(0.08, self._stock_ratio - random.uniform(0, 0.012))
-            self.brain.bus.publish(metric_event(
-                self.brain.room_id, now, self._online, round(self._stock_ratio, 3)))
+            self._stock_ratio = max(0.08, self._stock_ratio - random.uniform(0, 0.012)) \
+                if self.format_id == "ecommerce" else 1.0
+            event = metric_event(self.brain.room_id, now, self._online,
+                                 round(self._stock_ratio, 3))
+            self.brain.bus.publish(event)
+            self._record_event(event)
 
     async def _drain_commands(self) -> None:
         while self.hub.commands:
@@ -144,53 +218,100 @@ class ConsoleRuntime:
                     "segments", []))
                 self.brain.mixed.begin(time.time())
                 continue
-            self.brain.bus.publish(control_event(
-                self.brain.room_id, time.time(), action, params))
+            if action == "record_toggle":
+                print(self._toggle_record(params.get("path")))
+                continue
+            event = control_event(self.brain.room_id, time.time(),
+                                  action, params)
+            self.brain.bus.publish(event)
+            self._record_event(event)
 
     async def run(self) -> None:
         await self.brain.start()
+        self._t0 = time.time()
         self.brain.bus.publish(metric_event(
             self.brain.room_id, time.time(), self._online, self._stock_ratio))
+        if self.rtmp:
+            from ..streaming.lowfi import LowFiStreamer
+            self.streamer = LowFiStreamer(self.rtmp)
+            print("低配真推流已启动：%s" % self.rtmp)
         while self._running:
             await self._drain_commands()
             await self._feed()
             await self.brain._tick()
+            if self.streamer is not None:
+                await self._pump_stream()
             await asyncio.sleep(0.05)
+
+    async def _pump_stream(self) -> None:
+        """把已播出的话术推向 ffmpeg（字幕 + edge-tts 音频，P1-8）。"""
+        while self._speech_q:
+            sentence = self._speech_q.pop(0)
+            mp3 = b""
+            try:
+                import edge_tts
+                voice = self.brain.persona.current.voice \
+                    if hasattr(self.brain.persona.current, "voice") \
+                    else "zh-CN-XiaoxiaoNeural"
+                communicate = edge_tts.Communicate(sentence, voice)
+                mp3 = b"".join(chunk["data"]
+                               async for chunk in communicate.stream()
+                               if chunk.get("type") == "audio")
+            except Exception:
+                mp3 = b""                            # 离线/限流：字幕照走
+            self.streamer.say(sentence, mp3)
 
     def stop(self) -> None:
         self._running = False
 
     def start_server_thread(self) -> int:
-        server = serve(self.hub, port=self.port)
+        server = serve(self.hub, port=self.port, token=self.token)
 
         def _run():
             server.serve_forever()
 
         threading.Thread(target=_run, daemon=True,
                          name="livebrain-console-http").start()
+        # token 文件 + 带 token 的入口 URL（Mac 壳/浏览器均可取用）
+        token_file = "/tmp/livebrain-console-%d.token" % \
+            server.server_address[1]
+        try:
+            with open(token_file, "w", encoding="utf-8") as fh:
+                fh.write(self.token)
+        except OSError:
+            pass
         return server.server_address[1]
 
     def run_forever(self) -> None:
         port = self.start_server_thread()
-        print("播控大脑运营控制台已启动：http://127.0.0.1:%d（Ctrl-C 退出）" % port)
+        print("播控大脑运营控制台已启动："
+              "http://127.0.0.1:%d/?token=%s（Ctrl-C 退出）" % (port, self.token))
         try:
             self.loop.run_until_complete(self.run())
         except KeyboardInterrupt:
             pass
         finally:
             self.stop()
+            if self.recording:
+                self._toggle_record()
+            if self.streamer is not None:
+                self.streamer.stop()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="LiveBrain 运营控制台")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--room", default="room-console")
+    parser.add_argument("--config", default=None,
+                        help="配置 JSON（Settings 字段 + llm 段），示例 config.example.json")
+    parser.add_argument("--rtmp", default=None,
+                        help="低配真推流：RTMP 地址或本地 .flv 文件（需 ffmpeg）")
     parser.add_argument("--format", dest="format_id", default="ecommerce",
                         choices=["ecommerce", "chat", "music", "standup",
                                  "crosstalk"],
                         help="直播场景：电商带货/聊天陪伴/唱歌演艺/单口相声·脱口秀/多人相声")
     parser.add_argument("--data", default=None,
-                        help="直播间数据 JSON（商品/知识库），示例 config/room.example.json")
+                        help="直播间数据 JSON（商品/知识库/场景内容），示例 config/room.example.json")
     parser.add_argument("--real-llm", action="store_true",
                         help="接真实 OpenAI 兼容大模型（环境变量配置端点/凭据）；隐含 --creative")
     parser.add_argument("--creative", action="store_true",
@@ -198,7 +319,8 @@ def main() -> None:
     args = parser.parse_args()
     ConsoleRuntime(room_id=args.room, port=args.port, data_path=args.data,
                    real_llm=args.real_llm, format_id=args.format_id,
-                   creative=args.creative).run_forever()
+                   creative=args.creative, config_path=args.config,
+                   rtmp=args.rtmp).run_forever()
 
 
 if __name__ == "__main__":

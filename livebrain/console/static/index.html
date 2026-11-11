@@ -45,8 +45,7 @@
         </div>
         <div class="ops-group">
           <label>人设</label>
-          <button class="btn sm" onclick="postControl('persona_switch',{persona_id:'xiaotian'})">小甜</button>
-          <button class="btn sm" onclick="postControl('persona_switch',{persona_id:'ajing'})">阿静</button>
+          <span id="persona-buttons"></span>
         </div>
         <div class="ops-group">
           <label>切品</label>
@@ -57,8 +56,14 @@
           <label>人工动作</label>
           <button class="btn sm" onclick="postControl('human_ops',{op:'coupon',params:{amount:10}})">发 ¥10 券</button>
           <button class="btn sm" onclick="applyDemoSchedule()">应用演示排班</button>
+          <button class="btn sm" id="btn-record" onclick="postControl('record_toggle')">录制本场</button>
         </div>
         <div class="ops-hint">接管后 AI 静默并切换真人画面；交回需未核销承诺清零</div>
+      </div>
+
+      <div class="card">
+        <h3>场景面板 <span class="legend" id="format-legend"></span></h3>
+        <div class="kv" id="format-view"></div>
       </div>
 
       <div class="card">

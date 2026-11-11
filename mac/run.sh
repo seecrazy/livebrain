@@ -19,4 +19,10 @@ if [ ! -d "$HERE/LiveBrain Console.app" ]; then
     echo "首次运行，构建应用…"
     "$HERE/build.sh"
 fi
-open "$HERE/LiveBrain Console.app"
+# 读取服务 token，带鉴权入口打开（无 token 文件则裸开）
+TOKEN_FILE="/tmp/livebrain-console-$PORT.token"
+if [ -s "$TOKEN_FILE" ]; then
+    open "$HERE/LiveBrain Console.app" --args "http://127.0.0.1:$PORT/?token=$(cat "$TOKEN_FILE")"
+else
+    open "$HERE/LiveBrain Console.app"
+fi

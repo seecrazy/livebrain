@@ -73,3 +73,16 @@ class Settings:
             if hasattr(base, key):
                 setattr(base, key, value)
         return base
+
+    @classmethod
+    def from_file(cls, path: str) -> "Settings":
+        """从 JSON 配置文件加载（--config）。未知键忽略（如 llm/tts/_说明）。"""
+        import json
+        with open(path, encoding="utf-8") as fh:
+            try:
+                data = json.load(fh)
+            except json.JSONDecodeError as exc:
+                raise ValueError("配置文件解析失败：%s" % exc)
+        if not isinstance(data, dict):
+            raise ValueError("配置文件必须是 JSON 对象")
+        return cls.from_dict(data)

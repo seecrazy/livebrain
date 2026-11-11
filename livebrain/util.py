@@ -16,6 +16,11 @@ def sha256_hex(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def pii(identifier: str) -> str:
+    """PII 最小化：持久化载荷中的用户标识以哈希留存（控制台实时视图保留原文）。"""
+    return "u_" + sha256_hex(str(identifier))[:10]
+
+
 _uid_counter = itertools.count(1)
 
 

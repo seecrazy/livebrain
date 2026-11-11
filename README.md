@@ -65,8 +65,12 @@ python3 -m livebrain.console --format crosstalk --creative             # 用 Moc
 接真实大模型（火山方舟/DeepSeek/vLLM 任意 OpenAI 兼容端点）需环境变量：
 `ARK_API_KEY`、`LIVEBRAIN_LLM_BASE_URL`、`LIVEBRAIN_LLM_MODEL`；失败自动熔断回落，直播不中断。
 
-打开 **http://127.0.0.1:8765**（或 `mac/run.sh` 用 Mac 原生应用，⌘T 接管热键）。
+打开启动日志里**带 token 的入口 URL**（如 `http://127.0.0.1:8765/?token=xxxx`，API 鉴权防本机误操作；或 `mac/run.sh` 自动带 token 打开 Mac 原生应用，⌘T 接管热键）。
 开播自检自动执行：平台报备、形象授权、AI 标识门禁——任一不过直接拒绝开播。
+进阶：`--config config.example.json` 加载完整配置；`--rtmp rtmp://…`（或本地 `.flv` 文件）
+启动**低配真推流**（ffmpeg 合成画面+字幕+TTS 音频，无需 GPU/平台资质即可验证真实推流链路；
+需 `brew install ffmpeg`，缺 drawtext 滤镜时自动降级纯画面）。直播中随时点**录制本场**，
+导出的 JSONL 可直接交给 `tools/replay.py check` 做四不变量复盘。
 
 ### ② 直播中 · 值守（详见 [docs/USAGE.md](docs/USAGE.md)）
 
