@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>播控大脑 · 运营控制台</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◉</span>
+      <div>
+        <div class="title">播控大脑 <small>LiveBrain Console</small></div>
+        <div class="subtitle">仿真人直播经营智能体 · 值守大屏</div>
+      </div>
+    </div>
+    <div class="chips" id="status-chips"></div>
+    <div class="audit" id="audit-badge">审计链 —</div>
+  </header>
+
+  <div class="escalation" id="escalation" hidden>
+    ⚠ 平台判罚降权中：<span id="escalation-reason"></span> —— AI 只走保守模板，
+    <button class="mini" onclick="postControl('resume')">确认恢复</button>
+  </div>
+
+  <main class="grid">
+    <section class="col-left">
+      <div class="card video-card">
+        <div class="stage" id="stage">
+          <div class="avatar-orb" id="avatar-orb"><span>数字人</span></div>
+          <div class="human-cam" id="human-cam" hidden>
+            <span class="cam-tag">● LIVE</span> 真人画面
+          </div>
+          <div class="ai-badge" id="ai-badge">AI虚拟主播</div>
+          <div class="stage-meta" id="stage-meta"></div>
+        </div>
+      </div>
+
+      <div class="card ops-card">
+        <h3>运营操作</h3>
+        <div class="ops-row">
+          <button class="btn danger big" id="btn-takeover" onclick="takeover()">接管真人（T）</button>
+          <button class="btn" id="btn-rehandoff" onclick="postControl('rehandoff')" disabled>交回 AI</button>
+        </div>
+        <div class="ops-group">
+          <label>人设</label>
+          <button class="btn sm" onclick="postControl('persona_switch',{persona_id:'xiaotian'})">小甜</button>
+          <button class="btn sm" onclick="postControl('persona_switch',{persona_id:'ajing'})">阿静</button>
+        </div>
+        <div class="ops-group">
+          <label>切品</label>
+          <button class="btn sm" onclick="postControl('switch_product',{sku:'SKU001'})">烟酰胺精华</button>
+          <button class="btn sm" onclick="postControl('switch_product',{sku:'SKU002'})">叶黄素软糖</button>
+        </div>
+        <div class="ops-group">
+          <label>人工动作</label>
+          <button class="btn sm" onclick="postControl('human_ops',{op:'coupon',params:{amount:10}})">发 ¥10 券</button>
+          <button class="btn sm" onclick="applyDemoSchedule()">应用演示排班</button>
+        </div>
+        <div class="ops-hint">接管后 AI 静默并切换真人画面；交回需未核销承诺清零</div>
+      </div>
+
+      <div class="card">
+        <h3>承诺队列</h3>
+        <div class="list" id="promises"><div class="empty">暂无</div></div>
+      </div>
+    </section>
+
+    <section class="col-mid">
+      <div class="card tall">
+        <h3>话术时间线 <span class="legend" id="speech-stats"></span></h3>
+        <div class="timeline" id="speech"><div class="empty">等待开播…</div></div>
+      </div>
+      <div class="card">
+        <h3>降级链 / 运行统计</h3>
+        <div class="kv" id="runtime-stats"></div>
+      </div>
+    </section>
+
+    <section class="col-right">
+      <div class="card tall">
+        <h3>弹幕流 <span class="legend">红=注入隔离 · 橙=敏感 · 紫=诱导</span></h3>
+        <div class="danmu" id="danmu"><div class="empty">等待弹幕…</div></div>
+      </div>
+      <div class="card">
+        <h3>告警 / 判罚</h3>
+        <div class="list" id="alerts"><div class="empty">一切正常</div></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    合规内建：AI 标识门禁 · 形象授权门禁 · 报备前置 · 全量操作审计哈希链 ·
+    仅监听 127.0.0.1
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

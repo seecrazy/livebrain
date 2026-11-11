@@ -124,6 +124,7 @@ class LiveBrain:
         self._interact_counter = 0
         self._interact_index = 0
         self._filler_index = 0
+        self.danmu_feed: List[Dict] = []     # 运营控制台弹幕流（含意图/隔离标记）
         self._started = False
 
     # ------------------------------------------------------------------
@@ -362,13 +363,15 @@ class LiveBrain:
         now = self.clock.now()
 
         result = sanitize(text, self.settings.danmu_max_len)
+        intent = None if result.quarantined else \
+            classifier.classify(result.cleaned)
+        self._note_danmu(user_id, text, intent,
+                         quarantined=result.quarantined)
         if result.quarantined:
             self.audit.append("quarantine", self.room_id, {
                 "user_id": user_id, "text": text[:60],
                 "reasons": result.reasons})
             return
-
-        intent = classifier.classify(result.cleaned)
         if intent.intent == NOISE:
             return
         if self.takeover.ai_muted():
@@ -538,9 +541,99 @@ class LiveBrain:
         self._pending_speech.append(task)
         return task
 
+    def _note_danmu(self, user_id: str, text: str,
+                    intent: Optional[classifier.IntentResult],
+                    quarantined: bool) -> None:
+        """运营控制台弹幕流（最近 60 条，含意图与隔离标记）。"""
+        self.danmu_feed.append({
+            "ts": self.clock.now(),
+            "user": user_id,
+            "text": text[:60],
+            "intent": intent.intent if intent else "injection",
+            "subtype": intent.subtype if intent else "",
+            "quarantined": quarantined,
+        })
+        if len(self.danmu_feed) > 60:
+            self.danmu_feed = self.danmu_feed[-60:]
+
     # ------------------------------------------------------------------
     # 观测
     # ------------------------------------------------------------------
+    def state_snapshot(self) -> Dict:
+        """运营控制台/外部监控用状态快照（在编排器事件循环内调用）。"""
+        pipeline = self.pipeline
+        if pipeline.in_human_mode:
+            visual = "human" if getattr(self.platform, "human_capture", None) \
+                else "avatar_idle"
+        else:
+            visual = "avatar"
+        switches = [e for e in pipeline.log if e["type"] == "switch_source"]
+        recent_speech = [{
+            "ts": 0.0,
+            "track": r.task.track,
+            "source": r.task.source,
+            "text": r.spoken_text[:80],
+            "origin": r.task.origin[:40],
+            "interrupted": r.interrupted,
+            "emotion": r.task.emotion,
+        } for r in self.speech_results[-15:]]
+        return {
+            "room": self.room_id,
+            "started": self._started,
+            "stage": self.field.stage,
+            "stage_strategy": {
+                "interact_ratio": self.field.strategy().interact_reply_ratio,
+                "emotion": self.field.strategy().emotion,
+            },
+            "persona": self.persona.current.persona_id,
+            "persona_name": self.persona.current.name,
+            "mode": "human" if self.takeover.ai_muted() else "ai",
+            "escalation": dict(self.escalation),
+            "online": self.session.online,
+            "current_sku": self.session.current_sku,
+            "visual_source": visual,
+            "visual_history": [e["to"] for e in switches[-4:]],
+            "compliance": {
+                "armed": self.compliance.armed,
+                "label": self.compliance.profile.label_text
+                         if self.compliance.profile else "",
+                "policy": getattr(self.compliance.profile, "label_policy", "")
+                          if self.compliance.profile else "",
+            },
+            "speech": list(reversed(recent_speech)),      # 新的在前
+            "danmu_feed": list(reversed(self.danmu_feed[-25:])),
+            "promises": [{
+                "id": p.promise_id, "action": p.ops.action,
+                "status": p.status, "failures": p.failures,
+            } for p in self.promises.promises[-10:]],
+            "judgments": [{"reason": j.payload.get("reason"),
+                           "level": j.payload.get("level")}
+                          for j in self.judgments[-5:]],
+            "alerts": self.alerts[-10:],
+            "providers": {
+                "llm": self.llm_chain.current_name(),
+                "llm_switches": len(self.llm_chain.switch_log),
+            },
+            "mixed": {
+                "segments": [{"duration_s": s.duration_s, "mode": s.mode,
+                              "label": s.label}
+                             for s in self.mixed.segments],
+                "current_mode": self.mixed.current_mode(),
+                "pos": self.mixed._pos,
+            },
+            "audit": {
+                "count": len(self.audit.entries),
+                "verified": self.audit.verify()[0],
+                "quarantined": self.audit.count("quarantine"),
+                "promise_blocks": self.audit.count("promise_block"),
+                "generation_rejected": self.audit.count("generation_rejected"),
+            },
+            "stats": {
+                "utterances": len(self.speech_results),
+                "interrupted": sum(1 for r in self.speech_results
+                                   if r.interrupted),
+            },
+        }
     def spoken_texts(self) -> List[str]:
         return [r.spoken_text for r in self.speech_results]
 
