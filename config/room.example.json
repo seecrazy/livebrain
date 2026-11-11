@@ -1,0 +1,47 @@
+{
+  "_说明": "直播间数据示例：开播前把你的商品与知识库填进来，python3 -m livebrain.console --data 此文件",
+  "products": [
+    {
+      "sku": "SKU001",
+      "name": "烟酰胺焕亮精华",
+      "category": "beauty",
+      "price": 129.0,
+      "orig_price": 159.0,
+      "stock": 30,
+      "total_stock": 50,
+      "ship_days": 2,
+      "coupons": [{ "type": "full_cut", "threshold": 100, "cut": 10 }],
+      "qual_flags": []
+    },
+    {
+      "sku": "SKU002",
+      "name": "蓝莓叶黄素酯软糖",
+      "category": "food",
+      "price": 99.0,
+      "orig_price": 129.0,
+      "stock": 40,
+      "total_stock": 50,
+      "ship_days": 3,
+      "coupons": [],
+      "qual_flags": [],
+      "_注意": "普通食品：category=food 时宣称引擎自动禁止治疗/降血糖等功效话术"
+    }
+  ],
+  "knowledge": [
+    {
+      "sku": "SKU001",
+      "text": "含 5% 烟酰胺，主打提亮肤色与保湿；敏感肌建议先在耳后局部试用，无不适再上脸。",
+      "keywords": ["烟酰胺", "提亮", "保湿", "敏感肌", "局部试用"]
+    },
+    {
+      "sku": "SKU001",
+      "text": "建议晚间洁面后使用，白天使用需配合防晒；孕期哺乳期不建议使用。",
+      "keywords": ["晚间", "防晒", "孕期", "哺乳期"]
+    },
+    {
+      "sku": "SKU002",
+      "text": "每粒含叶黄素酯，是普通食品不是保健品，不能宣称任何功效；儿童每日不超过两粒。",
+      "keywords": ["叶黄素酯", "普通食品", "儿童"]
+    }
+  ]
+}

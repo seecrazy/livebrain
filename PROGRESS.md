@@ -66,7 +66,7 @@
 
 | 指标 | 当前值 | 趋势 |
 |---|---|---|
-| 测试用例 | **120 全绿**（20 个文件） | M1 交付 80 → M2 +20 → V4.2 +17 → V4.3 +3 |
+| 测试用例 | **125 全绿**（21 个文件） | M1 80 → M2 +20 → V4.2 +17 → V4.3 +3 → 可用性补强 +5 |
 | 测试覆盖场景 | 注入/填槽/规则/原子/过滤/审计链/管线打断/降级/场控/人设/聚合/接管/回放/红队集/Provider/filler/端到端/混播/形象资产/控制台 HTTP | — |
 | 外部依赖（运行时） | **0**（纯标准库；edge-tts 可选） | 保持 |
 | Python 兼容 | 3.9+ ｜ Mac 壳需 swiftc（Xcode CLT） | — |
@@ -100,4 +100,5 @@ python3 demo/run_demo.py             # 全场景演示
 | 2026-11-11 | `97bd0e7` | M2 代码完成：OpenAI 兼容 LLM Provider、EdgeTTS Provider、filler 调度、红队弹幕集（40 条）、回放测试工具、deploy 物料（PG DDL/compose/config）；分类器与消毒器红队修订；测试 80→100 |
 | 2026-11-11 | （文档批） | 文档专业化：DESIGN 嵌入 6 张 Mermaid 图；新增 PROGRESS.md；README/ROADMAP 重写 |
 | 2026-11-11 | （V4.2 批） | 混播引擎 + 形象资产管理 + 双主播设计；测试 100→117；DESIGN 升版 V4.2 |
-| 2026-11-11 | （本次） | V4.3 运营控制台：网页值守大屏（stdlib HTTP+原生 JS）+ Mac 原生应用（WKWebView+热键，swiftc 编译通过）；编排器增 danmu_feed/visual_source/state_snapshot；测试 117→120；DESIGN 升版 V4.3 |
+| 2026-11-11 | （V4.3 批） | 运营控制台：网页值守大屏 + Mac 原生应用（⌘T 热键，swiftc 编译通过）；测试 117→120；DESIGN 升版 V4.3 |
+| 2026-11-11 | （本次） | 可用性补强：`--data` 自定义商品/知识库加载（config/room.example.json，开播前校验）+ `--real-llm` 真实大模型接入（OpenAI 兼容端点，熔断自动回落）；README 重写"如何在直播中使用"（直播前/中/后）；新增 docs/USAGE.md 值守 SOP 手册；测试 120→125 |

@@ -1,12 +1,16 @@
 """运营控制台实时运行时：模拟直播间 + HTTP 服务同进程。
 
 用法：
-    python3 -m livebrain.console            # http://127.0.0.1:8765
+    python3 -m livebrain.console                                  # 内置演示数据
+    python3 -m livebrain.console --data my_room.json              # 你的商品与知识库
+    python3 -m livebrain.console --data my_room.json --real-llm   # 接真实大模型
     python3 -m livebrain.console --port 9000
 
+--real-llm：中轨改用 OpenAI 兼容真实端点（火山方舟/DeepSeek/vLLM），
+凭据读环境变量 ARK_API_KEY（或 LIVEBRAIN_LLM_API_KEY）、
+LIVEBRAIN_LLM_BASE_URL、LIVEBRAIN_LLM_MODEL；失败自动熔断回落 Mock。
 弹幕流：真实节奏随机生成（正常问题为主，约 8% 概率红队攻击样例），
 指标随机游走（在线人数波动、库存比缓降触发逼单）。
-运营动作全部由控制台/API 下发（接管/交回/切人设/切品/发券/演示排班）。
 """
 import argparse
 import asyncio
@@ -15,10 +19,14 @@ import threading
 import time
 
 from ..events import LiveEvent, control_event, danmu_event, metric_event
+from ..execution.degradation import CapabilityChain
+from ..execution.llm_openai_compat import OpenAICompatProvider
+from ..decision.llm_agent import MockLLM
 from ..orchestrator import LiveBrain
 from ..platform.mock_platform import MockPlatform
 from ..mixed.capture import MockHumanCapture
 from ..data import avatar_store as avatar_mod
+from .roomdata import load_room_data
 from .server import ConsoleHub, serve
 
 NORMAL_DANMU = [
@@ -39,7 +47,8 @@ ATTACK_DANMU = [
 
 
 class ConsoleRuntime:
-    def __init__(self, room_id: str = "room-console", port: int = 8765) -> None:
+    def __init__(self, room_id: str = "room-console", port: int = 8765,
+                 data_path: str = None, real_llm: bool = False) -> None:
         self.port = port
         self.platform = MockPlatform(room_id, human_capture=MockHumanCapture(),
                                      avatar_asset_id="ava-001")
@@ -50,6 +59,12 @@ class ConsoleRuntime:
             llm_script={},
             settings=None,          # 默认设置：实时节奏（clock_scale=1）
             avatar_store=self.avatars)
+        if data_path:
+            n_products, n_docs = load_room_data(self.brain, data_path)
+            print("已加载直播间数据：%d 个商品，%d 条知识" % (n_products, n_docs))
+        if real_llm:
+            self._switch_to_real_llm()
+        self.real_llm = real_llm
         self.loop = asyncio.new_event_loop()
         self.hub = ConsoleHub(self.brain, self.loop)
         self._online = 96
@@ -57,6 +72,16 @@ class ConsoleRuntime:
         self._last_metric = 0.0
         self._last_danmu = 0.0
         self._running = True
+
+    def _switch_to_real_llm(self) -> None:
+        primary = OpenAICompatProvider(name="live_llm")
+        backup = MockLLM("mock_llm_backup")
+        self.brain.llm_chain = CapabilityChain(
+            "llm", [primary, backup], self.brain.settings, self.brain.audit,
+            self.brain.clock, self.brain.room_id)
+        self.brain.mid_agent.chain = self.brain.llm_chain
+        print("已接入真实 LLM：%s（失败自动熔断回落 Mock）"
+              % (primary.model or "未配置 LIVEBRAIN_LLM_MODEL，调用时将报错切换") )
 
     async def _feed(self) -> None:
         """真实节奏事件源：弹幕 0.6~2.2s 一条，指标每 2s。"""
@@ -126,8 +151,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="LiveBrain 运营控制台")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--room", default="room-console")
+    parser.add_argument("--data", default=None,
+                        help="直播间数据 JSON（商品/知识库），示例 config/room.example.json")
+    parser.add_argument("--real-llm", action="store_true",
+                        help="接真实 OpenAI 兼容大模型（环境变量配置端点与凭据）")
     args = parser.parse_args()
-    ConsoleRuntime(room_id=args.room, port=args.port).run_forever()
+    ConsoleRuntime(room_id=args.room, port=args.port, data_path=args.data,
+                   real_llm=args.real_llm).run_forever()
 
 
 if __name__ == "__main__":
