@@ -1,6 +1,22 @@
-# 路线图（DESIGN.md §11 的落地细化）
+# 路线图（对应 DESIGN.md §11，进度事实见 PROGRESS.md）
 
-## M1：决策核心垂直切片 ✅（已交付）
+```mermaid
+gantt
+    title LiveBrain 里程碑
+    dateFormat YYYY-MM-DD
+    axisFormat %m-%d
+    section M1 决策核心
+    已交付（100 测试全绿）        :done, m1, 2026-11-11, 1d
+    section M2 真实 Provider
+    代码完成（Provider/红队/回放） :done, m2a, 2026-11-11, 1d
+    真实端点联调验证              :active, m2b, 2026-11-12, 14d
+    section M3 真平台与推流
+    适配器/RTMP/GPU池/watchdog    :m3, after m2b, 30d
+    section M4 经营闭环
+    数仓/看板/冷启动/副驾         :m4, after m3, 30d
+```
+
+## M1：决策核心垂直切片 ✅ 已交付（2026-11-11，提交 4f300d5）
 
 - [x] 自研编排器（asyncio，确定性驱动，ZCode 仅作开发工具链）
 - [x] 三轨决策：快轨规则 / 中轨 RAG+填槽 / 兜底池
@@ -16,31 +32,37 @@
 - [x] 审计哈希链（AI 话术 + 人工操作 + 帧检查点）+ verify
 - [x] 人工接管/交回（含未核销承诺清点）+ 人工操作审计
 - [x] 判罚事件接入 → 升级降权（只走保守模板）→ 人工确认恢复
-- [x] 模拟平台（弹幕脚本/判罚信号/运营动作）+ 端到端测试 80 个全绿
+- [x] 模拟平台 + 端到端测试 80 个全绿
 
-## M2：真实 Provider 与数据层
+## M2：真实 Provider 与数据层 🔶 代码完成（2026-11-11，提交 97bd0e7）
 
-- [ ] Ark LLM Provider（OpenAI 兼容端点，流式）
-- [ ] 商用 TTS Provider（火山/Azure；edge-tts 仅预合成素材与验证）
-- [ ] MuseTalk/OpenTalking 渲染 Provider（中断过渡段真实实现）
-- [ ] PostgreSQL + pgvector 平移商品库/知识库（接口不变）
-- [ ] 弹幕回放测试工具（录制流回放跑决策层回归）
-- [ ] filler 调度（慢轨等待期衔接话术，M1 留作接口）
-- [ ] 红队弹幕集扩充为独立资产文件
+**已交付：**
+- [x] OpenAI 兼容 LLM Provider（Ark/DeepSeek/vLLM 通用，零依赖，transport 可注入测试）
+- [x] EdgeTTS Provider（验证期专用；未安装优雅降级；不入商用链）
+- [x] filler 等待期衔接话术（LLM 延迟期间垫话，正式回答到达即取代，默认关闭）
+- [x] 红队弹幕集 40 条独立资产 + 资产驱动回归测试
+- [x] 回放测试工具（录制/回放/四不变量校验：哈希链/注入隔离/出稿干净/承诺核销）
+- [x] PG+pgvector DDL、docker-compose、config.example.json
+- [x] 测试 80 → 100 全绿
 
-验收：真实模型下数字零泄露（填槽校验拦截率 100%）；回放集回归全绿。
+**联调待办（需外部资源）：**
+- [ ] 真实 Ark 端点联调：填槽拦截率实测 = 100%（需 ARK_API_KEY）
+- [ ] edge-tts 真机合成试听与音色映射微调（本机已装 7.3.1）
+- [ ] MuseTalk/OpenTalking 渲染 Provider（需 GPU）
+- [ ] PG 实例数据层切换（compose 起库后接口平移）
 
-## M3：真平台与推流
+## M3：真平台与推流 ⏳ 未启动（前置：平台开放者资质、GPU 环境）
 
 - [ ] 首发平台适配器（事件 WebSocket + 运营动作 API + compliance profile）
 - [ ] RTMP 推流（双路、断流重连）与渲染器解耦
 - [ ] 多直播间编排器实例 + GPU 池调度（画质档位分配）
 - [ ] 渲染实例故障迁移（无状态化 + 人设基线恢复）
 - [ ] 观众侧 watchdog（口型/静音/冻屏检测）
+- [ ] TTS/渲染降级链运行时切换接线（熔断器已就绪）
 
 验收：连续 4 小时模拟推流稳定；打断端到端 <1.5s。
 
-## M4：经营与冷启动
+## M4：经营与冷启动 ⏳ 未启动
 
 - [ ] ClickHouse 数仓 + 话术效果热力图 + 直播间健康度看板
 - [ ] 冷启动：历史直播回放 ASR→QA 抽取→人工确认入库

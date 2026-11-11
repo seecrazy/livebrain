@@ -2,7 +2,7 @@
 
 **副标题**：仿真人直播经营智能体 | **版本**：V4.1（对 V4.0 评审整改后定稿）
 **合规基线**：《直播电商监督管理办法》（2026-02-01 施行）+ 各平台数字人专项规则
-**状态**：设计定稿，M1 已实现（见第十二章代码地图）
+**状态**：设计定稿；M1 已交付、M2 代码完成（进度详见 [PROGRESS.md](PROGRESS.md)）
 
 ---
 
@@ -60,6 +60,74 @@ V4.0 保留不变的部分：合规作为架构前提不可绕过、数字走规
 ---
 
 ## 3. 总体架构：五层 + 三总线 + 自研编排器
+
+```mermaid
+flowchart TB
+    subgraph AC["接入层 platform"]
+        direction LR
+        PA["平台适配器<br/>抖音 · 视频号 · 快手 · 淘宝"]
+        CP["compliance profile<br/>报备 · 标识规格 · 判罚信号"]
+    end
+    subgraph PE["感知层 perception"]
+        direction LR
+        BUS{{"事件总线（优先级堆）<br/>judgment=0 ＞ control=1 ＞ 热弹幕=3<br/>＞ 弹幕=5 ＞ 指标=8"}}
+        SAN["弹幕消毒<br/>注入隔离"]
+        CLS["意图预分类<br/>毫秒级规则"]
+        AGG["滑动窗口聚合<br/>＋回复率预算"]
+    end
+    subgraph DE["决策层 decision"]
+        ORCH["编排器 LiveBrain<br/>三轨路由 · 判罚升级 · 打断调度 · 承诺核销"]
+        FAST["快轨 FAST<br/>规则引擎＋促销计算<br/>＜500ms · 绕过 LLM"]
+        MID["中轨 MID<br/>RAG＋LLM＋填槽＋回检<br/>2–4s"]
+        FBK["兜底话术池<br/>防机械重复"]
+        FC["场控状态机"]
+        PS["人设管理"]
+        AT["话术原子＋承诺队列"]
+    end
+    subgraph EX["执行层 execution"]
+        direction LR
+        PIPE["流式管线<br/>切句→TTS→渲染→标识→帧哈希"]
+        DEG["降级链＋熔断器<br/>自动切换 · 审计 · 回滚"]
+        CG["AI 标识门禁<br/>未武装不出帧"]
+    end
+    subgraph DA["数据层 data"]
+        direction LR
+        PG[("商品库 PostgreSQL<br/>版本化快照")]
+        KV[("知识库 pgvector")]
+        SS[("会话 Redis")]
+        AU[("审计哈希链<br/>追加式 JSONL")]
+    end
+    PA --> BUS --> SAN --> CLS --> AGG --> ORCH
+    ORCH --> FAST
+    ORCH --> MID
+    ORCH --> FBK
+    ORCH --> FC
+    ORCH --> PS
+    ORCH --> AT
+    FAST --> PIPE
+    MID --> PIPE
+    FBK --> PIPE
+    AT -->|"运营动作 API"| PA
+    PIPE --> CG
+    PIPE -->|"push_speech 审计回吐判罚"| PA
+    DEG -.->|"provider 失败切换"| MID
+    ORCH -.-> PG
+    ORCH -.-> KV
+    ORCH -.-> SS
+    PIPE -.-> AU
+    classDef acL fill:#e3f2fd,stroke:#1976d2,color:#0d47a1,stroke-width:2px
+    classDef peL fill:#fff8e1,stroke:#f9a825,color:#5d4037,stroke-width:2px
+    classDef deL fill:#e8f5e9,stroke:#388e3c,color:#1b5e20,stroke-width:2px
+    classDef exL fill:#f3e5f5,stroke:#7b1fa2,color:#4a148c,stroke-width:2px
+    classDef daL fill:#fce4ec,stroke:#c2185b,color:#880e4f,stroke-width:2px
+    class PA,CP acL
+    class BUS,SAN,CLS,AGG peL
+    class ORCH,FAST,MID,FBK,FC,PS,AT deL
+    class PIPE,DEG,CG exL
+    class PG,KV,SS,AU daL
+```
+
+逻辑分层（文本版，便于 diff 与无渲染环境阅读）：
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
@@ -169,6 +237,46 @@ V4.0 保留不变的部分：合规作为架构前提不可绕过、数字走规
 
 打断策略：新话术优先级高于正在播报的（如快轨打断中轨），执行打断；接近句尾（最后一句最后一块）则不打断排队。
 
+弹幕从到达至出稿的全链路时序：
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant P as 平台适配器
+    participant B as 事件总线
+    participant S as 消毒器
+    participant C as 分类器
+    participant O as 编排器
+    participant F as 规则引擎（快轨）
+    participant G as LLM（中轨）
+    participant I as 流式管线
+    participant A as 审计总线
+    P->>B: 弹幕事件（优先级 3/5）
+    B->>S: 弹出最高优先级
+    alt 注入攻击
+        S--xA: quarantine（隔离记录）
+        S--xB: 丢弃，永不进生成路径
+    else 敏感宣称 / 承诺诱导
+        S->>C: 清洗后文本
+        C->>O: sensitive / action_request
+        O->>I: 固定模板（零生成，优先级 1）
+    else 价格 / 库存 / 发货
+        C->>O: price_stock（聚合合并）
+        O->>F: 快轨（＜500ms，绕过 LLM）
+        F-->>O: 模板填槽成品（金额逐字匹配）
+        O->>I: 播报（优先级 2，可打断中轨）
+    else 产品咨询
+        C->>O: product_consult
+        O->>I: filler 衔接话术（真实 LLM 延迟下）
+        O->>G: RAG 检索 → 生成（仅占位符）
+        G-->>O: 填槽＋回检＋过滤后任务
+        O->>I: 播报（优先级 4，取代 filler）
+    end
+    I->>I: 三道过滤 → 原子展开＋承诺扫描 → 人设装饰
+    I-->>A: utterance（全文＋帧哈希区间）
+    I->>P: push_speech（平台审核，可回吐判罚事件）
+```
+
 ### 6.2 三条快慢轨
 
 | 轨道 | 路径 | 端到端目标 | 典型场景 |
@@ -227,6 +335,24 @@ filler 话术（"这个问题很好，我详细给她说下哈"）是等待期�
 
 人设自动切换**仅允许**发生在阶段边界；手动切换单场 ≤3 次。
 
+```mermaid
+stateDiagram-v2
+    state "暖场期 WARMUP<br/>互动优先 · 回复率 1.0" as W
+    state "讲解期 EXPLAIN<br/>按排品推进 · 回复率 0.2" as E
+    state "逼单期 CLOSING<br/>价格优先级＋2 · 情绪紧迫" as C
+    state "低谷期 VALLEY<br/>福利拉停留 · 回复率 0.8" as V
+    [*] --> W
+    W --> E: 在线≥阈值（连续 2 周期）
+    E --> C: 库存比＜20%
+    E --> V: 在线较 5 分钟峰值降＞30%
+    C --> E: 库存比＞50%
+    V --> E: 在线＞70% 峰值（重置基准）
+    note right of E
+        滞回切换：防指标抖动
+        人设自动切换仅阶段边界
+    end note
+```
+
 ### 6.9 人设与情绪
 
 persona = prompt 片段 + TTS style 映射 + 表情基线 + 允许场景 + 口头禅（装饰器必须数字无关，不破坏填槽校验）。切换即时生效于下一句，当前句播完过渡。
@@ -269,6 +395,27 @@ execute(action: OpsAction) -> ActionResult
 
 - LLM 流式输出按标点切句 → TTS 流式合成 → 渲染器边收音频块边出帧 → 标识叠加 → 推流；
 - **打断协议**：高优先级话术到达 → 当前 TTS 音频 **50ms 淡出** → 渲染层播 **200–300ms 中性表情交叉淡化过渡段**（杜绝口型穿帮）→ 新话术接入；
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant O as 编排器
+    participant T as TTS
+    participant R as 渲染器
+    participant S as 推流（带 AI 标识）
+    Note over O,S: 中轨长话术播报中（优先级 4）
+    O->>T: 句子流式合成
+    T->>R: 音频块
+    R->>S: 视频帧（每 30 帧哈希检查点）
+    Note over O: 快轨价格问题到达（优先级 2）
+    O->>O: 优先级判定：2 ＜ 4，打断
+    O->>T: request_interrupt
+    T-->>S: 当前音频 50ms 淡出
+    R-->>S: 250ms 中性表情交叉淡化（防口型穿帮）
+    O->>T: 新话术接入
+    T->>R: 新音频块
+    R->>S: 新帧（标识保持叠加）
+```
 - 帧哈希：每 30 帧（≈1s）一个检查点哈希，与当前话术 ID 绑定写入审计（见 8.4）。
 
 ### 7.5 全链路降级与熔断（R6）
@@ -309,6 +456,19 @@ execute(action: OpsAction) -> ActionResult
 - **核查流程**：时间段 → AI 话术文本 → 帧区间 → 与留存的录像/哈希链比对；
 - **不承诺**：跨硬件确定性重渲染复现（不可实现），"可证明未篡改"由追加式存储+哈希链达成。
 
+```mermaid
+flowchart LR
+    G(("genesis")) --> E1["entry 1 · utterance<br/>H1 = SHA256(G ‖ C1)"]
+    E1 --> E2["entry 2 · promise<br/>H2 = SHA256(H1 ‖ C2)"]
+    E2 --> E3["entry 3 · frame_checkpoint<br/>H3 = SHA256(H2 ‖ C3)"]
+    E3 --> EN["⋯ 追加式，只增不改"]
+    EN -.->|"verify() 逐条重算比对"| AUD["监管核查路径<br/>时间段 → 话术文本 → 帧区间<br/>→ 哈希比对 → 不一致即定位到 seq"]
+    classDef ent fill:#e8eaf6,stroke:#3949ab,color:#1a237e
+    classDef aud fill:#fff3e0,stroke:#fb8c00,color:#e65100
+    class E1,E2,E3,EN,G ent
+    class AUD aud
+```
+
 ### 8.5 直播数仓
 
 ClickHouse：弹幕时间线、AI 回复及来源轨道、转化事件、讲品节奏对齐 → 话术效果热力图。M4。
@@ -334,26 +494,43 @@ ClickHouse：弹幕时间线、AI 回复及来源轨道、转化事件、讲品�
 
 ## 11. 里程碑与验收
 
-| 里程碑 | 内容 | 验收标准 |
-|---|---|---|
-| **M1（已交付）** | 编排器+三轨+填槽+消毒+原子承诺+过滤+场控+人设+审计哈希链+流式管线与打断+降级熔断+模拟平台+接管；全 Provider Mock，零外部依赖 | 全部单测/集成测试绿；模拟直播间端到端跑通：正常问答/注入隔离/敏感拒答/幻觉拦截/承诺执行/判罚升级/降级切换/打断 |
-| M2 | 真实 Provider：Ark LLM、edge-tts（验证）、MuseTalk/OpenTalking；PostgreSQL+pgvector 落地；弹幕回放测试工具 | 真实模型下填槽校验拦截率=100%（数字不泄露）；回放集回归绿 |
-| M3 | 真平台适配（首发一家）+ RTMP 推流 + 多直播间 GPU 调度 | 连续 4 小时模拟推流稳定；打断端到端 <1.5s |
-| M4 | 数仓/健康度看板、冷启动 ASR 工具（历史直播→QA 抽取）、副驾模式灰度 | 看板指标齐；副驾模式试点 |
+```mermaid
+gantt
+    title LiveBrain 里程碑（2026-11 起）
+    dateFormat YYYY-MM-DD
+    axisFormat %m-%d
+    section M1 决策核心
+    设计整改＋编码＋100 测试全绿      :done, m1, 2026-11-11, 1d
+    section M2 真实 Provider
+    代码完成（Provider/红队/回放）   :done, m2a, 2026-11-11, 1d
+    真实端点联调验证                 :active, m2b, 2026-11-12, 14d
+    section M3 真平台与推流
+    适配器/RTMP/GPU 池/watchdog      :m3, after m2b, 30d
+    section M4 经营闭环
+    数仓/看板/冷启动/副驾            :m4, after m3, 30d
+```
+
+| 里程碑 | 内容 | 验收标准 | 状态 |
+|---|---|---|---|
+| **M1** | 编排器+三轨+填槽+消毒+原子承诺+过滤+场控+人设+审计哈希链+流式管线与打断+降级熔断+模拟平台+接管；全 Provider Mock，零外部依赖 | 全部单测/集成测试绿；模拟直播间端到端跑通：正常问答/注入隔离/敏感拒答/幻觉拦截/承诺执行/判罚升级/降级切换/打断 | ✅ 已交付（100 测试全绿） |
+| **M2** | 真实 Provider：OpenAI 兼容 LLM（Ark 等）、EdgeTTS（验证期）、filler 调度；PG+pgvector DDL 与部署物料；红队弹幕集；回放测试工具 | 真实模型下填槽校验拦截率=100%（数字不泄露）；回放集回归绿 | 🔶 代码完成（离线 100 测试绿；真实端点联调待 API Key） |
+| M3 | 真平台适配（首发一家）+ RTMP 推流 + 多直播间 GPU 调度 | 连续 4 小时模拟推流稳定；打断端到端 <1.5s | ⏳ 待启动（需平台开放者资质与 GPU 环境） |
+| M4 | 数仓/健康度看板、冷启动 ASR 工具（历史直播→QA 抽取）、副驾模式灰度 | 看板指标齐；副驾模式试点 | ⏳ 待启动 |
 
 ---
 
-## 12. M1 代码地图（本仓库）
+## 12. 代码地图（M1+M2 已实现部分）
 
 ```
 livebrain/
 ├── util.py                    Clock（可缩放时钟）/canonical_json/sha256
-├── config.py                  Settings：降级链/预算/阈值/熔断参数
+├── config.py                  Settings：降级链/预算/阈值/熔断参数/filler 开关
 ├── events.py                  标准事件对象与优先级
 ├── bus.py                     事件总线（heapq 优先级队列）
+├── scenarios.py               演示/回放共用剧本（所见即所测）★M2
 ├── perception/
-│   ├── sanitizer.py           弹幕消毒器（注入隔离）
-│   ├── classifier.py          意图预分类（含 sensitive/action/购买意图）
+│   ├── sanitizer.py           弹幕消毒器（注入隔离，红队集回归）
+│   ├── classifier.py          意图预分类（sensitive/action/购买意图）
 │   └── aggregator.py          滑动窗口聚合 + 回复率预算
 ├── decision/
 │   ├── slots.py               填槽制核心（占位符校验/填充/裸数字拦截）
@@ -366,8 +543,9 @@ livebrain/
 │   ├── field_controller.py    场控阶段状态机（滞回）
 │   └── persona.py             人设管理（切换约束+数字无关装饰）
 ├── execution/
-│   ├── tts.py                 TTS Provider 接口 + Mock
-│   ├── renderer.py            渲染 Provider 接口 + Mock（含过渡帧/帧哈希）
+│   ├── tts.py                 TTS 接口 + Mock + EdgeTTS（验证期）★M2
+│   ├── llm_openai_compat.py   OpenAI 兼容 LLM Provider（Ark 等）★M2
+│   ├── renderer.py            渲染接口 + Mock（含过渡帧/帧哈希）
 │   ├── compliance.py          AI 标识门禁
 │   ├── pipeline.py            流式管线：切句→TTS→渲染→标识→帧哈希；打断协议
 │   └── degradation.py         熔断器 + 能力降级链（审计+回滚）
@@ -378,10 +556,12 @@ livebrain/
 ├── platform/
 │   └── mock_platform.py       模拟平台：弹幕脚本/判罚信号/运营动作执行
 ├── ops/takeover.py            人工接管/交回（含状态摘要）
-└── orchestrator.py            LiveBrain 编排器（三轨路由/判罚升级/打断调度）
+└── orchestrator.py            LiveBrain 编排器（三轨路由/判罚升级/打断调度/filler）★filler
 
-tests/                         12 个测试文件（注入/填槽/规则/原子/过滤/审计链/
-                               管线打断/降级/场控/聚合/接管/端到端模拟）
+assets/redteam_danmu.jsonl     红队弹幕集（40 条：注入/敏感/诱导/正常）★M2
+tools/replay.py                回放测试工具（录制/回放/四不变量校验）★M2
+deploy/                        schema.sql（PG+pgvector DDL）/ docker-compose / config.example ★M2
+tests/                         17 个测试文件，100 个用例全绿
 demo/run_demo.py               模拟直播间演示（全场景一条龙）
 ```
 
