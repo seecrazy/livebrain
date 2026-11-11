@@ -182,3 +182,12 @@ footer {
   box-shadow: 0 6px 18px #0008; animation: slidein .2s ease;
 }
 .toast-bad { background: #7f1d1d; color: #fecaca; border-color: #ef4444; }
+
+/* ---- 批2：指标 chips / 录制路径 / tabular 数字 ---- */
+.chips-metrics { flex: 0 0 auto; }
+.record-path {
+  display: block; margin-top: 6px; color: #fca5a5; font-size: 11px;
+  font-family: var(--mono); word-break: break-all;
+}
+#btn-copy-rec { margin-top: 4px; }
+.num, .chip b, .kv b { font-variant-numeric: tabular-nums; }

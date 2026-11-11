@@ -81,6 +81,27 @@ function renderTopbar(s) {
     chip(`品 <b>${s.current_sku}</b>`, ""),
     chip(`LLM <b>${s.providers.llm}</b>`, ""),
   ].join("");
+  const m = $("metric-chips");
+  if (m) {
+    m.innerHTML = [
+      chip(`弹幕/分 <b>${s.stats.danmu_last_min ?? "-"}</b>`, ""),
+      chip(`回复/分 <b>${s.stats.replies_last_min ?? "-"}</b>`, ""),
+      s.rtmp ? chip(`推流 <b>${s.rtmp_status === "alive" ? "✓" : "✗"}</b>`,
+                    s.rtmp_status === "alive" ? "mode-ai" : "mode-human") : "",
+    ].join("");
+  }
+  const recPath = $("record-path");
+  const copyBtn = $("btn-copy-rec");
+  if (recPath && copyBtn) {
+    const rec = s.recording || {};
+    if (rec.active) {
+      recPath.textContent = "录制中 → " + rec.path + "（" + rec.events + " 条）";
+      copyBtn.hidden = false;
+    } else {
+      recPath.textContent = "";
+      copyBtn.hidden = true;
+    }
+  }
   const audit = $("audit-badge");
   audit.textContent = s.audit.verified
     ? `审计链 ✓ ${s.audit.count} 条` : `审计链 ✗ 异常`;
@@ -136,9 +157,11 @@ function renderSpeech(s) {
   else {
     box.innerHTML = s.speech.map((u) => {
       const [cls, name] = TRACK_TAG[u.track] || ["noise", u.track];
+      const hhmmss = u.ts ? new Date(u.ts * 1000).toTimeString().slice(0, 8) : "";
       return `<div class="item">
         <div class="meta">
           <span class="tag ${cls}">${name}</span>
+          <span class="origin num">${hhmmss}</span>
           <span class="tag noise">${u.source}</span>
           <span class="tag noise">${u.emotion}</span>
           ${u.interrupted ? '<span class="tag interrupted">⚡被打断</span>' : ""}
@@ -194,6 +217,14 @@ function renderLists(s) {
     ["排班段", s.mixed.segments.length ? `${s.mixed.pos + 1}/${s.mixed.segments.length}` : "未启用"],
     ["排班模式", s.mixed.segments.length ? s.mixed.current_mode : "-"],
   ].map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join("");
+}
+
+function copyRecordPath() {
+  const rec = (lastState && lastState.recording) || {};
+  if (rec.path && navigator.clipboard) {
+    navigator.clipboard.writeText(rec.path);
+    showToast("已复制：" + rec.path);
+  }
 }
 
 function escapeHtml(text) {

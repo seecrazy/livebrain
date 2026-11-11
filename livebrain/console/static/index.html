@@ -16,6 +16,7 @@
       </div>
     </div>
     <div class="chips" id="status-chips"></div>
+    <div class="chips chips-metrics" id="metric-chips"></div>
     <div class="audit" id="audit-badge">审计链 —</div>
   </header>
 
@@ -62,7 +63,12 @@
           <button class="btn sm" onclick="applyDemoSchedule()">应用演示排班</button>
           <button class="btn sm" id="btn-record" onclick="postControl('record_toggle')">录制本场</button>
         </div>
-        <div class="ops-hint">接管后 AI 静默并切换真人画面；交回需未核销承诺清零</div>
+        <div class="ops-hint">
+          接管后 AI 静默并切换真人画面；交回需未核销承诺清零<br>
+          快捷键：<b>T</b> 接管 · <b>R</b> 交回（Mac：⌘T / ⌥⌘R / ⌥⌘A）
+          <span id="record-path" class="record-path"></span>
+          <button class="btn sm" id="btn-copy-rec" onclick="copyRecordPath()" hidden>复制录制路径</button>
+        </div>
       </div>
 
       <div class="card">

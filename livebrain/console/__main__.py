@@ -82,7 +82,7 @@ class ConsoleRuntime:
                  data_path: str = None, real_llm: bool = False,
                  format_id: str = "ecommerce",
                  creative: bool = False, config_path: str = None,
-                 rtmp: str = None) -> None:
+                 rtmp: str = None, auto_open: bool = True) -> None:
         self.port = port
         self.format_id = format_id
         self.config = {}
@@ -175,8 +175,11 @@ class ConsoleRuntime:
             self.recording = False
             return "录制停止：%s（%d 条事件，可交 tools/replay.py check）" % (
                 self.record_path, self.record_count)
-        self.record_path = path or "/tmp/livebrain-session-%d.jsonl" % int(
-            time.time())
+        record_dir = os.path.join(os.getcwd(), "recordings")
+        os.makedirs(record_dir, exist_ok=True)
+        self.record_path = path or os.path.join(
+            record_dir, "livebrain-session-%s.jsonl"
+            % time.strftime("%Y%m%d-%H%M%S"))
         self._record_fh = open(self.record_path, "w", encoding="utf-8")
         self.recording = True
         self.record_count = 0
@@ -311,8 +314,11 @@ class ConsoleRuntime:
 
     def run_forever(self) -> None:
         port = self.start_server_thread()
-        print("播控大脑运营控制台已启动："
-              "http://127.0.0.1:%d/?token=%s（Ctrl-C 退出）" % (port, self.token))
+        url = "http://127.0.0.1:%d/?token=%s" % (port, self.token)
+        print("播控大脑运营控制台已启动：%s（Ctrl-C 退出）" % url)
+        if self.auto_open:
+            import webbrowser
+            threading.Timer(0.6, lambda: webbrowser.open(url)).start()
         try:
             self.loop.run_until_complete(self.run())
         except KeyboardInterrupt:
@@ -339,6 +345,8 @@ def main() -> None:
                         help="直播场景：电商带货/聊天陪伴/唱歌演艺/单口相声·脱口秀/多人相声")
     parser.add_argument("--data", default=None,
                         help="直播间数据 JSON（商品/知识库/场景内容），示例 config/room.example.json")
+    parser.add_argument("--no-open", action="store_true",
+                        help="启动后不自动打开浏览器")
     parser.add_argument("--real-llm", action="store_true",
                         help="接真实 OpenAI 兼容大模型（环境变量配置端点/凭据）；隐含 --creative")
     parser.add_argument("--creative", action="store_true",
@@ -347,7 +355,7 @@ def main() -> None:
     ConsoleRuntime(room_id=args.room, port=args.port, data_path=args.data,
                    real_llm=args.real_llm, format_id=args.format_id,
                    creative=args.creative, config_path=args.config,
-                   rtmp=args.rtmp).run_forever()
+                   rtmp=args.rtmp, auto_open=not args.no_open).run_forever()
 
 
 if __name__ == "__main__":

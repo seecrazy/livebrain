@@ -684,7 +684,7 @@ class LiveBrain:
             visual = "avatar"
         switches = [e for e in pipeline.log if e["type"] == "switch_source"]
         recent_speech = [{
-            "ts": 0.0,
+            "ts": r.task.created_ts,
             "track": r.task.track,
             "source": r.task.source,
             "text": r.spoken_text[:80],
