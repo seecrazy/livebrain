@@ -7,13 +7,14 @@ from typing import List, Optional
 
 from ..decision.field_controller import StageStrategy
 from .base import RoomFormat, build_task, register
+from .creative import CreativeWriter, ai_task
 
 # ---------------------------------------------------------------- 电商带货
 class EcommerceFormat(RoomFormat):
     format_id = "ecommerce"
     display_name = "电商带货"
 
-    def proactive(self, brain) -> Optional[object]:
+    async def proactive(self, brain) -> Optional[object]:
         """空闲排品推进：复用兜底话术池（防机械重复设计同样适用）。"""
         product = brain.store.get(brain.session.current_sku)
         name = product.name if product else "本品"
@@ -51,8 +52,19 @@ class ChatFormat(RoomFormat):
     def __init__(self):
         self._topic_pos = 0
         self.topics = list(self.TOPICS)     # 可被 --data 装载覆盖
+        self._user_content = False          # --data 提供过内容则优先用户
 
-    def proactive(self, brain):
+    async def proactive(self, brain):
+        if (brain.settings.creative_llm and not self._user_content):
+            lines = await CreativeWriter(brain).generate(
+                "topic", "人设：%s。当前阶段：%s。刚聊过：%s" % (
+                    brain.persona.current.name, brain.field.stage,
+                    brain.speech_results[-1].spoken_text[:30]
+                    if brain.speech_results else "开播暖场"),
+                sentences=1)
+            if lines:
+                return ai_task(brain, lines, source="format:topic_ai",
+                               origin="AI话题", emotion="warm")
         topic = self.topics[self._topic_pos % len(self.topics)]
         self._topic_pos += 1
         return build_task([topic], source="format:topic",
@@ -121,8 +133,9 @@ class MusicFormat(RoomFormat):
              % (song, max(0, len(self.queue) - 1))],
             source="format:song_ack", origin=text, clock=brain.clock)
 
-    def proactive(self, brain):
-        """节目推进：队首出歌报幕（演唱音轨 M3 接入，当前为报幕话术）。"""
+    async def proactive(self, brain):
+        """节目推进：队首出歌报幕（演唱音轨 M3 接入，当前为报幕话术）。
+        版权白名单不可 AI 生成：音乐授权是法律约束，必须用户/内置显式提供。"""
         if not self.queue:
             return build_task(
                 ["点歌单随时更新，想听什么打在评论区，授权曲库里都安排～"],
@@ -170,6 +183,7 @@ class StandupFormat(RoomFormat):
         self._pos = 0
         self._current: Optional[dict] = None
         self.jokes = list(self.JOKES)      # 可被 --data 装载覆盖
+        self._user_content = False
 
     def _next_joke(self) -> dict:
         joke = self.jokes[self._pos % len(self.jokes)]
@@ -182,7 +196,14 @@ class StandupFormat(RoomFormat):
                           source="format:joke", origin="段子:%s" % joke["id"],
                           emotion="witty", clock=brain.clock)
 
-    def proactive(self, brain):
+    async def proactive(self, brain):
+        if (brain.settings.creative_llm and not self._user_content):
+            lines = await CreativeWriter(brain).generate(
+                "joke", "人设：%s。直播场景：脱口秀。原创一个新段子。" %
+                brain.persona.current.name, sentences=2)
+            if lines:
+                return ai_task(brain, lines, source="format:joke_ai",
+                               origin="AI段子")
         return self._joke_task(self._next_joke(), brain)
 
     def handle_joke_request(self, brain, text, user_id):
@@ -238,10 +259,30 @@ class CrosstalkFormat(RoomFormat):
     def __init__(self):
         self._pos = 0
         self.script = list(self.SCRIPT)    # 可被 --data 装载覆盖
+        self._user_content = False
+        self._last_role = "B"              # 轮转基准：下一位该 A
 
-    def proactive(self, brain):
+    async def proactive(self, brain):
+        if (brain.settings.creative_llm and not self._user_content):
+            role = "B" if self._last_role == "A" else "A"
+            recent = "".join(
+                r.spoken_text for r in brain.speech_results[-3:])
+            lines = await CreativeWriter(brain).generate(
+                "crosstalk",
+                "当前该 %s（%s）说。最近对词：%s。请续写 %s 的下一句。" % (
+                    role, "逗哏" if role == "A" else "捧哏",
+                    recent[-80:] or "刚开场垫话", role),
+                sentences=1)
+            if lines:
+                self._last_role = role
+                emotion = "playful" if role == "A" else "steady"
+                return build_task(
+                    ["%s：%s" % (role, lines[0])],
+                    source="format:crosstalk_ai", origin="AI对词",
+                    emotion=emotion, clock=brain.clock)
         beat = self.script[self._pos % len(self.script)]
         self._pos += 1
+        self._last_role = beat["role"]
         emotion = "playful" if beat["role"] == "A" else "steady"
         return build_task(
             [("%s：%s" % (beat["role"], beat["line"]))],
@@ -249,8 +290,15 @@ class CrosstalkFormat(RoomFormat):
             emotion=emotion, clock=brain.clock)
 
     def handle_joke_request(self, brain, text, user_id):
-        """相声场的"来一段/返场"：直接续演对词，不走婉拒。"""
-        return self.proactive(brain)
+        """相声场的"来一段/返场"：续演对词（同步路径，走内置脚本）。"""
+        beat = self.script[self._pos % len(self.script)]
+        self._pos += 1
+        self._last_role = beat["role"]
+        emotion = "playful" if beat["role"] == "A" else "steady"
+        return build_task(
+            [("%s：%s" % (beat["role"], beat["line"]))],
+            source="format:crosstalk", origin="对词:%d" % self._pos,
+            emotion=emotion, clock=brain.clock)
 
 
 for _cls in (EcommerceFormat, ChatFormat, MusicFormat, StandupFormat,

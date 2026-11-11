@@ -203,7 +203,7 @@ class LiveBrain:
                 self._idle_ticks += 1
                 if self._idle_ticks >= self.settings.proactive_after_ticks:
                     self._idle_ticks = 0
-                    task = self.format.proactive(self)
+                    task = await self.format.proactive(self)
                     if task is not None:
                         self._submit_speech(task)
         else:

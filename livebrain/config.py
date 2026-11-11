@@ -23,6 +23,11 @@ class Settings:
     # 场景包提供主动节目内容（排品/话题/段子/报幕/对词）。0=关闭。
     proactive_after_ticks: int = 0
 
+    # AI 内容创作（V4.4.1）：场景内容未由 --data 指定时，主动节目由
+    # 大模型原创（段子/话题/对词），失败回落内置种子库。
+    # 用户内容优先级始终最高；版权曲库不可 AI 生成。
+    creative_llm: bool = False
+
     # 弹幕处理
     danmu_max_len: int = 120
     aggregate_window_s: float = 15.0

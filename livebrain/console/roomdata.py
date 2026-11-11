@@ -81,7 +81,7 @@ def load_room_data(brain, path: str) -> Tuple[int, int]:
 
 
 def _load_format_content(brain, data: Dict) -> None:
-    """场景内容块装载：只对当前场景生效。"""
+    """场景内容块装载：只对当前场景生效；用户内容置最高优先级标记。"""
     fmt = brain.format
     block = data.get(fmt.format_id)
     if not isinstance(block, dict):
@@ -91,11 +91,12 @@ def _load_format_content(brain, data: Dict) -> None:
         topics = [str(t) for t in block.get("topics", []) if str(t).strip()]
         if topics:
             fmt.topics = topics
+            fmt._user_content = True
     elif fmt.format_id == "music":
         whitelist = [str(s) for s in block.get("whitelist", [])
                      if str(s).strip()]
         if whitelist:
-            fmt.whitelist = whitelist          # 授权曲库整体替换
+            fmt.whitelist = whitelist          # 授权曲库整体替换（不可 AI 生成）
     elif fmt.format_id == "standup":
         jokes = []
         for index, joke in enumerate(block.get("jokes", [])):
@@ -105,6 +106,7 @@ def _load_format_content(brain, data: Dict) -> None:
                 "setup": str(joke["setup"]), "punch": str(joke["punch"])})
         if jokes:
             fmt.jokes = jokes
+            fmt._user_content = True
     elif fmt.format_id == "crosstalk":
         script = []
         for index, beat in enumerate(block.get("script", [])):
@@ -116,6 +118,7 @@ def _load_format_content(brain, data: Dict) -> None:
             script.append({"role": role, "line": str(beat["line"])})
         if script:
             fmt.script = script
+            fmt._user_content = True
 
 
 def _yuan_to_cents(value: Any) -> int:

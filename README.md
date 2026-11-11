@@ -39,17 +39,17 @@ python3 -m livebrain.console --format crosstalk     # 多人相声：对词轮�
 
 ### ① 直播前 · 10 分钟准备
 
-**第一步：准备直播间数据**（一个 JSON 搞定，按场景取用，示例见 `config/room.example.json`）
+**第一步：准备直播间数据**（全部**选填**——不填时 AI 自动创作内容，AI 不可用回落内置；示例见 `config/room.example.json`）
 
-| 场景 | 要准备什么 | JSON 块 |
+| 场景 | 选填内容（不填=AI 原创） | JSON 块 |
 |---|---|---|
-| 电商带货（默认） | 商品库 + 知识库（价格单位=元） | `"products"` + `"knowledge"` |
-| 唱歌演艺 | **授权曲库白名单**（版权硬约束，未授权曲目自动婉拒） | `"music": {"whitelist": [...]}` |
-| 单口相声·脱口秀 | 你的段子（setup + 包袱） | `"standup": {"jokes": [...]}` |
-| 多人相声 | 对词本（A=逗哏 / B=捧哏） | `"crosstalk": {"script": [...]}` |
-| 聊天陪伴 | 话题库 | `"chat": {"topics": [...]}` |
+| 电商带货（默认） | 商品库 + 知识库（价格单位=元；不填用内置演示商品） | `"products"` + `"knowledge"` |
+| 唱歌演艺 | **授权曲库白名单**（⚠唯一必选项：版权是法律约束，AI 不能替你授权；不填用内置曲库） | `"music": {"whitelist": [...]}` |
+| 单口相声·脱口秀 | 你的段子（setup + 包袱；不填由 AI 现挂原创） | `"standup": {"jokes": [...]}` |
+| 多人相声 | 对词本（A=逗哏 / B=捧哏；不填由 AI 按角色轮转续写） | `"crosstalk": {"script": [...]}` |
+| 聊天陪伴 | 话题库（不填由 AI 抛话题） | `"chat": {"topics": [...]}` |
 
-场景内容块按 `--format` 生效（同一份文件可同时存多场景内容）；不准备也能开播，用内置演示内容。
+内容优先级：**用户内容（--data）> AI 原创（`--creative`，接 `--real-llm` 时自动开启）> 内置种子库**；AI 创作同样过三道过滤（违禁词/极限词/敏感话题），失败自动回落，直播不冷场。场景内容块按 `--format` 生效（同一份文件可同时存多场景内容）。
 
 **第二步：启动值守控制台**
 
@@ -58,7 +58,8 @@ cp config/room.example.json my_room.json    # 改成你的内容
 
 python3 -m livebrain.console --data my_room.json                        # 电商带货
 python3 -m livebrain.console --data my_room.json --format music         # 唱歌演艺
-python3 -m livebrain.console --data my_room.json --format standup --real-llm   # 接真实大模型
+python3 -m livebrain.console --format standup --real-llm                # AI 现挂段子（隐含 --creative）
+python3 -m livebrain.console --format crosstalk --creative             # 用 Mock 模型演示 AI 对词链路
 ```
 
 接真实大模型（火山方舟/DeepSeek/vLLM 任意 OpenAI 兼容端点）需环境变量：

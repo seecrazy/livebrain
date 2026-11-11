@@ -7,7 +7,7 @@
 
 | # | 检查项 | 怎么做 | 不过会怎样 |
 |---|---|---|---|
-| 1 | 直播间数据 | `python3 -m livebrain.console --data my_room.json --format <场景>`（格式见 `config/room.example.json`）：电商备 products/knowledge；唱歌备**授权曲库白名单**；相声备段子/对词本；聊天备话题库。场景块按 `--format` 生效 | 缺字段/零价格/缺包袱/非法角色启动即报错——开播前发现好过直播中翻车 |
+| 1 | 直播间数据（**全部选填**） | `python3 -m livebrain.console --data my_room.json --format <场景>`：电商备 products/knowledge；唱歌备**授权曲库白名单**（⚠唯一必选：AI 不能替你拿版权）；相声备段子/对词本；聊天备话题库。**不填时 AI 自动创作**（`--creative` 或 `--real-llm`），失败回落内置；优先级：用户内容 > AI 原创 > 内置种子 | 缺字段/零价格/缺包袱/非法角色启动即报错——开播前发现好过直播中翻车 |
 | 2 | 大模型（可选） | `--real-llm` + 环境变量 `ARK_API_KEY`、`LIVEBRAIN_LLM_BASE_URL`、`LIVEBRAIN_LLM_MODEL` | 未配置时中轨走兜底话术池，直播不中断 |
 | 3 | 合规门禁 | 启动即自动校验：平台报备、形象授权（真人底模须未过期肖像授权）、AI 标识武装 | 任一不过**拒绝开播**（这是特性不是故障） |
 | 4 | 值守端 | 浏览器开 `http://127.0.0.1:8765`，或 `mac/run.sh`（⌘T 接管热键） | — |

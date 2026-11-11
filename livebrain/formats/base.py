@@ -39,8 +39,11 @@ class RoomFormat:
         """覆盖默认场控策略（同四阶段键，参数与情绪按场景定）。"""
         return {}
 
-    def proactive(self, brain) -> Optional[SpeechTask]:
-        """空闲时的主动节目推进（没人提问也要持续播）。"""
+    async def proactive(self, brain) -> Optional[SpeechTask]:
+        """空闲时的主动节目推进（没人提问也要持续播）。
+
+        内容优先级：用户内容（--data）> AI 原创（settings.creative_llm）> 内置种子。
+        """
         return None
 
     def handle_song_request(self, brain, text: str,

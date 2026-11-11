@@ -78,7 +78,8 @@ ATTACK_DANMU = [
 class ConsoleRuntime:
     def __init__(self, room_id: str = "room-console", port: int = 8765,
                  data_path: str = None, real_llm: bool = False,
-                 format_id: str = "ecommerce") -> None:
+                 format_id: str = "ecommerce",
+                 creative: bool = False) -> None:
         self.port = port
         self.format_id = format_id
         self.platform = MockPlatform(room_id, human_capture=MockHumanCapture(),
@@ -88,7 +89,8 @@ class ConsoleRuntime:
         self.brain = LiveBrain(
             platform=self.platform, room_id=room_id,
             llm_script={},
-            settings=Settings(proactive_after_ticks=16),   # 冷场约0.8s上节目
+            settings=Settings(proactive_after_ticks=16,   # 冷场约0.8s上节目
+                              creative_llm=creative or real_llm),
             avatar_store=self.avatars, format_id=format_id)
         if data_path:
             n_products, n_docs = load_room_data(self.brain, data_path)
@@ -190,11 +192,13 @@ def main() -> None:
     parser.add_argument("--data", default=None,
                         help="直播间数据 JSON（商品/知识库），示例 config/room.example.json")
     parser.add_argument("--real-llm", action="store_true",
-                        help="接真实 OpenAI 兼容大模型（环境变量配置端点与凭据）")
+                        help="接真实 OpenAI 兼容大模型（环境变量配置端点/凭据）；隐含 --creative")
+    parser.add_argument("--creative", action="store_true",
+                        help="场景内容由 AI 原创（段子/话题/对词），用户 --data 内容优先，失败回落内置")
     args = parser.parse_args()
     ConsoleRuntime(room_id=args.room, port=args.port, data_path=args.data,
-                   real_llm=args.real_llm,
-                   format_id=args.format_id).run_forever()
+                   real_llm=args.real_llm, format_id=args.format_id,
+                   creative=args.creative).run_forever()
 
 
 if __name__ == "__main__":

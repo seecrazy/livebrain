@@ -132,10 +132,10 @@ def test_standup_joke_flow_and_interrupt_retry():
 
     # 被打断的段子回炉重讲（确定性验证回滚语义）
     fmt = brain.format
-    task = fmt.proactive(brain)                     # 取一段子，pos 前进
+    task = asyncio.run(fmt.proactive(brain))       # 取一段子，pos 前进
     probe = type("R", (), {"interrupted": True, "task": task})()
     fmt.on_speech_done(brain, probe)                # 打断 -> pos 回退
-    replay = fmt.proactive(brain)
+    replay = asyncio.run(fmt.proactive(brain))
     assert replay.origin == task.origin, "同一段子应回炉重讲"
     assert replay.sentences == task.sentences
 
