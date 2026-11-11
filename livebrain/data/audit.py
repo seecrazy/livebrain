@@ -31,6 +31,8 @@ class AuditLog:
         self.entries: List[AuditEntry] = []
         self._last_hash = GENESIS
         self._fh = None
+        self._fh_pending = 0                    # 批量落盘（批1 性能）
+        self._fh_last_flush = time.time()
         if path:
             self._fh = open(path, "a", encoding="utf-8")
         # 长直播保护（P0-2）：内存环形上限 + 裁剪锚点（全量日志仍在 JSONL 文件）
@@ -62,7 +64,13 @@ class AuditLog:
                 "room_id": entry.room_id, "payload": entry.payload,
                 "prev_hash": entry.prev_hash, "entry_hash": entry.entry_hash,
             }) + "\n")
-            self._fh.flush()
+            self._fh_pending += 1
+            # 批量 flush：每 20 条或满 1 秒落盘一次（崩溃最多丢 1 秒尾部）
+            if (self._fh_pending >= 20
+                    or time.time() - self._fh_last_flush >= 1.0):
+                self._fh.flush()
+                self._fh_pending = 0
+                self._fh_last_flush = time.time()
         return entry
 
     def _trim(self) -> None:
@@ -125,5 +133,6 @@ class AuditLog:
 
     def close(self) -> None:
         if self._fh:
+            self._fh.flush()
             self._fh.close()
             self._fh = None

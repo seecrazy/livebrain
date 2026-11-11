@@ -130,6 +130,8 @@ class ConsoleRuntime:
         self._last_danmu = 0.0
         self._last_gift = 0.0
         self._running = True
+        self._streamer_restarts = 0
+        self._streamer_failed = False
         self.hub = ConsoleHub(self.brain, self.loop, extra_state=self._extra_state)
 
     def _extra_state(self) -> dict:
@@ -137,6 +139,9 @@ class ConsoleRuntime:
             "recording": {"active": self.recording, "path": self.record_path or "",
                           "events": self.record_count},
             "rtmp": self.rtmp or "",
+            "rtmp_status": "off" if not self.streamer else (
+                "alive" if self.streamer.healthy() else "dead"),
+            "rtmp_restarts": self._streamer_restarts,
         }
 
     def _switch_to_real_llm(self) -> None:
@@ -241,7 +246,29 @@ class ConsoleRuntime:
             await self.brain._tick()
             if self.streamer is not None:
                 await self._pump_stream()
+                self._watch_streamer()          # 推流看护（批1 可靠性）
             await asyncio.sleep(0.05)
+
+    def _watch_streamer(self) -> None:
+        """ffmpeg 崩溃：告警 + 自动重启（限 2 次），再崩停用保直播画面。"""
+        if self.streamer is None or self.streamer.healthy():
+            return
+        if self._streamer_restarts >= 2:
+            if not self._streamer_failed:
+                self._streamer_failed = True
+                print("告警：推流进程多次崩溃，已停用推流（控制台画面仍在）")
+            self.streamer.stop()
+            self.streamer = None
+            return
+        self._streamer_restarts += 1
+        print("告警：推流进程退出，自动重启（第 %d 次）" % self._streamer_restarts)
+        self.streamer.stop()
+        from ..streaming.lowfi import LowFiStreamer
+        try:
+            self.streamer = LowFiStreamer(self.rtmp)
+        except Exception as exc:
+            print("推流重启失败：%s" % exc)
+            self.streamer = None
 
     async def _pump_stream(self) -> None:
         """把已播出的话术推向 ffmpeg（字幕 + edge-tts 音频，P1-8）。"""

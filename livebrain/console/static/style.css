@@ -167,3 +167,18 @@ footer {
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-thumb { background: #22304a; border-radius: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ---- 断连/心跳横幅 + toast（批1/批2）---- */
+.escalation.disconnect {
+  background: #450a0a; color: #fca5a5; border-bottom-color: #991b1b;
+}
+#toast-host {
+  position: fixed; right: 18px; bottom: 18px; display: flex;
+  flex-direction: column; gap: 8px; z-index: 99;
+}
+.toast {
+  background: #14532d; color: #bbf7d0; border: 1px solid #22c55e;
+  padding: 8px 14px; border-radius: 8px; font-size: 13px;
+  box-shadow: 0 6px 18px #0008; animation: slidein .2s ease;
+}
+.toast-bad { background: #7f1d1d; color: #fecaca; border-color: #ef4444; }

@@ -22,9 +22,11 @@ async function postControl(action, params = {}) {
       headers: { "X-LiveBrain-Token": TOKEN },
     });
     const data = await res.json();
-    if (!data.ok) console.warn("control rejected:", data.detail);
+    showToast(data.ok ? "指令已下发：" + action : "指令被拒绝：" + data.detail,
+              !!data.ok);
   } catch (err) {
     console.error("control error:", err);
+    showToast("指令发送失败（连接异常）", false);
   }
   refresh();                      // 立即拉一次状态
 }
@@ -228,5 +230,38 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/* 连接与心跳监测（批1 可靠性） */
+let failCount = 0;
+async function guardedRefresh() {
+  try {
+    await refresh();
+    failCount = 0;
+    $("disconnect").hidden = true;
+    const hb = lastState && lastState.heartbeat;
+    if (hb && hb.age_s > 3) {
+      $("disconnect").hidden = false;
+      $("disconnect").textContent = "⛔ 编排器心跳超时（" + hb.age_s.toFixed(1) + "s）—— 检查运行日志";
+    }
+  } catch (err) {
+    failCount += 1;
+    if (failCount >= 2) $("disconnect").hidden = false;
+  }
+}
+
+/* toast（批2 易用性） */
+function showToast(text, ok = true) {
+  let host = $("toast-host");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "toast-host";
+    document.body.appendChild(host);
+  }
+  const item = document.createElement("div");
+  item.className = "toast" + (ok ? "" : " toast-bad");
+  item.textContent = text;
+  host.appendChild(item);
+  setTimeout(() => item.remove(), 2600);
+}
+
 refresh();
-setInterval(refresh, 800);
+setInterval(guardedRefresh, 800);

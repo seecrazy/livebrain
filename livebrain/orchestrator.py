@@ -131,6 +131,8 @@ class LiveBrain:
         self._interact_index = 0
         self._filler_index = 0
         self._idle_ticks = 0                       # 场景包主动推进计数
+        self.last_tick_ts = 0.0                    # 心跳（控制台判断编排器活性）
+        self.tick_errors = 0                       # tick 异常计数（连续异常=循环病危）
         self._gen_tasks: List = []                 # 并发中的中轨生成任务（P0-1）
         self.danmu_feed: List[Dict] = []     # 运营控制台弹幕流（含意图/隔离标记）
         self._started = False
@@ -180,7 +182,28 @@ class LiveBrain:
     # 调度循环
     # ------------------------------------------------------------------
     async def _tick(self) -> bool:
+        """带顶层防护的 tick：任何异常都不许杀死值守循环（批1 可靠性）。
+
+        异常 -> 告警+审计+自愈清理，循环继续；持续异常通过 tick_errors
+        与心跳时间戳暴露给控制台。
+        """
+        try:
+            return await self._tick_inner()
+        except Exception as exc:
+            self.tick_errors += 1
+            self.alerts.append("TICK_ERROR:%s" % exc)
+            self.audit.append("tick_error", self.room_id,
+                              {"error": str(exc), "count": self.tick_errors})
+            try:
+                if self._speak_task is not None and self._speak_task.done():
+                    self._collect_speak_result()
+            except Exception:
+                pass
+            return True                       # 保持循环存活
+
+    async def _tick_inner(self) -> bool:
         progressed = False
+        self.last_tick_ts = self.clock.now()
 
         # 收尾已完成的生成任务（P0-1）
         if self._gen_tasks:
@@ -221,8 +244,11 @@ class LiveBrain:
         else:
             self._idle_ticks = 0
 
-        event = self.bus.get()
-        if event is not None:
+        # 批量处理（批1 性能）：每 tick 最多 12 条，弹幕洪峰不积压
+        for _ in range(12):
+            event = self.bus.get()
+            if event is None:
+                break
             await self._handle(event)
             progressed = True
         if self.promises.pending():
@@ -729,6 +755,18 @@ class LiveBrain:
                 "utterances": len(self.speech_results),
                 "interrupted": sum(1 for r in self.speech_results
                                    if r.interrupted),
+                "danmu_last_min": sum(
+                    1 for d in self.danmu_feed
+                    if self.clock.now() - d["ts"] < 60),
+                "replies_last_min": sum(
+                    1 for r in self.speech_results
+                    if self.clock.now() - r.task.created_ts < 60),
+            },
+            "heartbeat": {
+                "last_tick_ts": self.last_tick_ts,
+                "age_s": max(0.0, self.clock.now() - self.last_tick_ts)
+                         if self.last_tick_ts else -1,
+                "tick_errors": self.tick_errors,
             },
         }
     def spoken_texts(self) -> List[str]:
