@@ -5,3 +5,4 @@ demo/audit_demo.jsonl
 *.egg-info/
 .venv/
 .DS_Store
+recordings/

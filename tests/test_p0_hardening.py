@@ -158,6 +158,34 @@ def test_console_token_auth():
         loop.call_soon_threadsafe(loop.stop)
 
 
+def test_console_static_routes_with_query():
+    """带 token 的入口链接 `/?token=…` 不能 404（查询串不参与路由匹配）。"""
+    brain = LiveBrain(platform=MockPlatform("room-tq"),
+                      settings=Settings(clock_scale=0.0), room_id="room-tq")
+
+    async def boot():
+        await brain.start()
+
+    asyncio.run(boot())
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    from livebrain.console.server import ConsoleHub
+    hub = ConsoleHub(brain, loop)
+    server = serve(hub, port=0, token="sec123")
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = "http://127.0.0.1:%d" % server.server_address[1]
+    try:
+        status, body = _http("GET", base + "/?token=sec123")
+        assert status == 200 and b"<html" in body.lower(), "带 token 首页必须返回页面"
+        status, body = _http("GET", base + "/app.js?token=sec123")
+        assert status == 200 and b"TOKEN" in body
+        status, body = _http("GET", base + "/style.css?token=sec123")
+        assert status == 200 and b"--ok" in body
+    finally:
+        server.shutdown()
+        loop.call_soon_threadsafe(loop.stop)
+
+
 # ------------------------------------------------ 段子包袱续讲（P1-7）
 def test_joke_resume_from_punch():
     from livebrain.formats.packs import StandupFormat

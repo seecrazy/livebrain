@@ -83,7 +83,9 @@ class ChatFormat(RoomFormat):
                 "评论区聊起来，我都看着呢～"]
 
     def view(self, brain):
-        return {"话题进度": "%d/%d" % (self._topic_pos + 1, len(self.topics)),
+        # 话题循环使用，进度按本轮位置显示（避免无限累加出现 6/4）
+        return {"话题进度": "%d/%d" % (self._topic_pos % len(self.topics) + 1,
+                                      len(self.topics)),
                 "内容来源": "用户话题库" if self._user_content else "AI 原创+内置"}
 
     def interact_reply(self, brain):
@@ -238,7 +240,9 @@ class StandupFormat(RoomFormat):
         return self._joke_task(self._next_joke(), brain)
 
     def view(self, brain):
-        return {"段子进度": "%d/%d" % (self._pos, len(self.jokes)),
+        # 段子循环使用，进度按本轮位置显示（避免无限累加出现 73/4）
+        pos = (self._pos - 1) % len(self.jokes) + 1 if self._pos else 0
+        return {"段子进度": "%d/%d" % (pos, len(self.jokes)),
                 "内容来源": "用户段子库" if self._user_content else "AI 原创+内置",
                 "待续包袱": self._resume_punch["id"] if self._resume_punch else "—"}
 
@@ -334,7 +338,9 @@ class CrosstalkFormat(RoomFormat):
 
     def view(self, brain):
         next_role = "B" if self._last_role == "A" else "A"
-        return {"对词进度": "%d/%d" % (self._pos, len(self.script)),
+        # 对词循环使用，进度按本轮位置显示（避免无限累加越界）
+        pos = (self._pos - 1) % len(self.script) + 1 if self._pos else 0
+        return {"对词进度": "%d/%d" % (pos, len(self.script)),
                 "下一棒": "%s（%s）" % (next_role, "逗哏" if next_role == "A" else "捧哏"),
                 "内容来源": "用户对词本" if self._user_content else "AI 续写+内置"}
 

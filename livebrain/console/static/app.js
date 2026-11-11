@@ -134,7 +134,9 @@ function renderOps(s) {
   const rec = s.recording || {};
   const btn = $("btn-record");
   if (btn) {
-    btn.textContent = rec.active ? `停止录制（${rec.events}）` : "录制本场";
+    btn.innerHTML = rec.active
+      ? `<span class="rec-dot"></span>停止录制（${rec.events}）`
+      : "录制本场";
     btn.classList.toggle("danger", !!rec.active);
   }
 }
@@ -204,7 +206,7 @@ function renderLists(s) {
   const alerts = [...s.judgments.map((j) => `[判罚] ${j.reason}`),
                   ...s.alerts].slice(-8);
   $("alerts").innerHTML = alerts.length
-    ? alerts.map((a) => `<div class="item"><div>${escapeHtml(a)}</div></div>`).join("")
+    ? alerts.map((a) => `<div class="item${/JUDGMENT|BLOCKED|ERROR/.test(a) ? " item-alert" : ""}"><div>${escapeHtml(a)}</div></div>`).join("")
     : '<div class="empty">一切正常</div>';
 
   $("runtime-stats").innerHTML = [

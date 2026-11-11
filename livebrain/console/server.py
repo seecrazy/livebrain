@@ -95,16 +95,17 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):                   # noqa: N802（stdlib 约定）
-        if self.path.startswith("/api/") and not self._authorized():
+        path = self.path.split("?", 1)[0]
+        if path.startswith("/api/") and not self._authorized():
             self._send_json({"error": "unauthorized"}, 401)
             return
-        if self.path in ("/", "/index.html"):
+        if path in ("/", "/index.html"):
             self._send_static("index.html", "text/html; charset=utf-8")
-        elif self.path == "/app.js":
+        elif path == "/app.js":
             self._send_static("app.js", "application/javascript; charset=utf-8")
-        elif self.path == "/style.css":
+        elif path == "/style.css":
             self._send_static("style.css", "text/css; charset=utf-8")
-        elif self.path.startswith("/api/state"):
+        elif path.startswith("/api/state"):
             try:
                 self._send_json(self.hub.snapshot())
             except Exception as exc:
@@ -113,7 +114,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "not_found"}, 404)
 
     def do_POST(self):                  # noqa: N802
-        if self.path != "/api/control":
+        if self.path.split("?", 1)[0] != "/api/control":
             self._send_json({"error": "not_found"}, 404)
             return
         if not self._authorized():

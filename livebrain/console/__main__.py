@@ -111,6 +111,7 @@ class ConsoleRuntime:
             n_products, n_docs = load_room_data(self.brain, data_path)
             print("已加载直播间数据：%d 个商品，%d 条知识" % (n_products, n_docs))
         self.rtmp = rtmp
+        self.auto_open = auto_open
         self.streamer = None
         self._speech_q = []                          # 已播话术 → 推流队列
         if real_llm:
